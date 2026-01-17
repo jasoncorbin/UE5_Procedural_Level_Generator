@@ -1,0 +1,21 @@
+# Unreal Engine
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+.vs/
+.idea/
+*.sln
+*.VC.db
+*.opensdf
+*.sdf
+*.user
+*.userprefs
+*.log
+
+# Build outputs
+Build/
+
+# OS junk
+.DS_Store
+Thumbs.db
