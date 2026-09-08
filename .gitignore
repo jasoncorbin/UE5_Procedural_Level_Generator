@@ -89,3 +89,6 @@ DerivedDataCache/
 !.gitattributes
 # Session transcripts
 transcript.txt
+
+# Generated per-machine by UnrealBuildTool project generation
+.vscode/compileCommands_*
