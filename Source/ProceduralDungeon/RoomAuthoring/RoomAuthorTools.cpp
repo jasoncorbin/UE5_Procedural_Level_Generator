@@ -3,7 +3,9 @@
 #include "RectDungeon/RectRoomTools.h"
 #include "RoomAuthoring/RoomAuthorValidate.h"
 
+#include "Components/ArrowComponent.h"
 #include "Components/AudioComponent.h"
+#include "Components/BoxComponent.h"
 #include "Components/ChildActorComponent.h"
 #include "Components/DecalComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -40,6 +42,7 @@
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/SCS_Node.h"
+#include "Engine/InheritableComponentHandler.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Misc/PackageName.h"
@@ -899,14 +902,577 @@ bool URoomAuthorTools::IsLiveFixtureComponent(const UActorComponent* Component)
 
 // ---------------------------------------------------------------------------- the bake
 //
-// ApplyExitContractToAsset and BakeAuthoredRoom are DELIBERATELY ABSENT, not lost. In
-// Level_Creator_1 they occupied these 365 lines and wrote a URectRoomAsset plus a baked
-// prefab beside it. This project's rooms are Master_Room_C children -- exit arrows under an
-// Exits Folder, an Overlap_Box on the RoomOverlap channel, floor at Z=0, origin at the
-// entrance -- so the OUTPUT half of the bake is a rewrite against a different contract
-// rather than a port, and it is step 6 of the port plan.
+// Writes Master_Room_C children, which is what makes this a REWRITE of Level_Creator_1's bake
+// rather than a port of it. That one emitted a URectRoomAsset plus a prefab beside it, for a
+// solver that is not coming across. This project's dungeon generator is the Blueprint one
+// already here, and its rooms are Master_Room children -- so the bake targets that contract
+// directly and no converter is needed anywhere.
 //
-// Everything the bake consumed is already here and tested: the validated layout, the
+// The contract, read off the real assets rather than a document (see MasterRoomContractTests):
+//
+//   parent class          Master_Room_C
+//   exit arrows       ->  Exits Folder      (inherited)
+//   floor spawns      ->  FloorSpawnPoints  (inherited)
+//   geometry          ->  GeometryFolder    (inherited)
+//   Arrow             ->  overridden to the room's centre
+//   Overlap_Box       ->  overridden to the room's footprint, RoomOverlap channel
+//
+// ONE BLUEPRINT PER EXIT. A room piece has exactly one entrance and it sits at the piece's own
+// origin -- structural, not stylistic, because the generator deferred-spawns each room at the
+// chosen exit's world transform and a piece pivoted anywhere else would drop part of itself
+// onto the doorway. So a room with N exits bakes to N pieces, each rebased so a different exit
+// is the entrance. They are derived data, regenerated wholesale by the next bake, so the cost
+// is disk rather than authoring -- and it is the only way such a room can be entered from more
+// than one side.
+
+namespace
+{
+	/** Master_Room itself -- the class every baked piece derives from. */
+	const TCHAR* const MasterRoomPath =
+		TEXT("/Game/ProceduralLevel/LevelPieces/Master_Room.Master_Room");
+
+	/** The inherited components a baked piece hangs its own work off. */
+	const TCHAR* const ExitsFolderName = TEXT("Exits Folder");
+	const TCHAR* const FloorPointsName = TEXT("FloorSpawnPoints");
+	const TCHAR* const GeometryFolderName = TEXT("GeometryFolder");
+	const TCHAR* const ArrowName = TEXT("Arrow");
+	const TCHAR* const OverlapBoxName = TEXT("Overlap_Box");
+
+	/**
+	 * Master_Room's Overlap_Box is authored with a 32 uu half-extent and SCALED to fit each
+	 * room, so the scale is the only number a bake writes.
+	 */
+	constexpr double OverlapBoxUnitUU = 32.0;
+
+	/** The box sits this far below the floor, matching every hand-built room. */
+	constexpr double OverlapBoxZUU = -50.0;
+
+	/**
+	 * How many whole scale units the footprint gives up on each side.
+	 *
+	 * NOT a guess and not a round number pulled from nowhere: it is what reproduces both
+	 * measured rooms exactly. 1_Room1 is 4000 uu across, so a half-extent of 2000 would want
+	 * scale 62.5; it ships 61. 1_Hall1's short axis wants 31.25; it ships 30. Both are
+	 * floor(half / 32) - 1, so the rule is "fit inside in whole units, then back off one",
+	 * which lands at 48 uu of clearance on one room and 40 on the other. A constant inset
+	 * matches neither.
+	 *
+	 * The clearance exists so two rooms standing wall to wall do not overlap-test against each
+	 * other; without it the generator would refuse its own correct placements.
+	 */
+	constexpr int32 OverlapBoxBackoffUnits = 1;
+
+	/**
+	 * The name prefixes every node this bake owns. Nothing else in a baked piece is touched.
+	 *
+	 * These are the ONLY thing separating what the bake owns from what a person added to the
+	 * piece by hand. Change one and every previously-baked Blueprint's nodes stop being
+	 * recognised as bake-owned: they survive the next clear and the room doubles.
+	 */
+	const TCHAR* const BakedNodePrefixes[] = {
+		TEXT("Piece_"), TEXT("Fixture_"), TEXT("Exit_"), TEXT("FloorPoint_") };
+
+	/**
+	 * Remove everything a previous bake wrote, leaving anything hand-added in place.
+	 *
+	 * FIND then CLEAR, rather than re-creating the Blueprint: FKismetEditorUtilities::
+	 * CreateBlueprint asserts when one of that name already exists, so the ordinary
+	 * edit-and-rebake loop would be a hard editor crash instead of a refresh.
+	 *
+	 * Collected into an array BEFORE removing any of them, because RemoveNode mutates the very
+	 * list GetAllNodes returns a reference to.
+	 */
+	void ClearBakedNodes(UBlueprint& BP)
+	{
+		if (BP.SimpleConstructionScript == nullptr) { return; }
+
+		TArray<USCS_Node*> Doomed;
+		for (USCS_Node* Node : BP.SimpleConstructionScript->GetAllNodes())
+		{
+			if (Node == nullptr) { continue; }
+			const FString Name = Node->GetVariableName().ToString();
+			for (const TCHAR* Prefix : BakedNodePrefixes)
+			{
+				if (Name.StartsWith(Prefix))
+				{
+					Doomed.Add(Node);
+					break;
+				}
+			}
+		}
+
+		for (USCS_Node* Node : Doomed)
+		{
+			BP.SimpleConstructionScript->RemoveNodeAndPromoteChildren(Node);
+		}
+	}
+
+	/** Master_Room's Blueprint, or null with OutError set. */
+	UBlueprint* LoadMasterRoom(FString& OutError)
+	{
+		UBlueprint* BP = LoadObject<UBlueprint>(nullptr, MasterRoomPath);
+		if (BP == nullptr)
+		{
+			OutError = FString::Printf(
+				TEXT("REFUSED - %s did not load. Every baked room derives from it, so there is "
+				     "nothing to bake into."), MasterRoomPath);
+			return nullptr;
+		}
+		if (BP->GeneratedClass == nullptr)
+		{
+			OutError = FString::Printf(
+				TEXT("REFUSED - %s has no generated class. Compile it and bake again."),
+				MasterRoomPath);
+			return nullptr;
+		}
+		return BP;
+	}
+
+	/**
+	 * One of Master_Room's own SCS nodes, by name.
+	 *
+	 * Looked up rather than assumed, and a miss is a refusal rather than a silently unparented
+	 * component: attaching to nothing puts a room's exit arrows at the actor root, where the
+	 * generator's exit scan does not look, and the room reads as having no exits at all.
+	 */
+	USCS_Node* FindMasterNode(UBlueprint& MasterRoom, const TCHAR* NodeName)
+	{
+		if (MasterRoom.SimpleConstructionScript == nullptr) { return nullptr; }
+		return MasterRoom.SimpleConstructionScript->FindSCSNode(FName(NodeName));
+	}
+
+	/**
+	 * The transform that carries an authored-frame placement into the baked frame for one
+	 * entrance: translate that exit's midpoint onto the origin, then quarter-turn so the body
+	 * runs along +X.
+	 *
+	 * Built from the pure integer helpers rather than restating them, so the Blueprint a bake
+	 * writes and the arithmetic the tests pin cannot drift apart.
+	 */
+	FTransform BakeFrameFor(int64 WidthTiles, int64 LengthTiles, RectGen::ERectSide Entrance)
+	{
+		int64 Mx = 0, My = 0;
+		RoomAuthor::ExitMidpointUU(WidthTiles, LengthTiles, Entrance, Mx, My);
+
+		const FTransform Recentre(FRotator::ZeroRotator,
+			FVector(-static_cast<double>(Mx), -static_cast<double>(My), 0.0));
+		const FTransform Turn(FRotator(0.0, static_cast<double>(
+			RoomAuthor::BakeYawDegreesFor(Entrance)), 0.0));
+
+		return Recentre * Turn;
+	}
+
+	/** Add a node under one of Master_Room's inherited components. */
+	USCS_Node* AddNodeUnder(UBlueprint& BP, UClass* ComponentClass, const FName Name,
+	                        USCS_Node& InheritedParent)
+	{
+		USCS_Node* Node = BP.SimpleConstructionScript->CreateNode(ComponentClass, Name);
+		if (Node == nullptr) { return nullptr; }
+
+		// AddNode first, SetParent second. AddNode installs the node as a root of THIS
+		// Blueprint's SCS; SetParent then records that its real parent is a component of the
+		// class above, which is how a child Blueprint hangs work off an inherited component at
+		// all. Doing only the first leaves everything at the actor root.
+		BP.SimpleConstructionScript->AddNode(Node);
+		Node->SetParent(&InheritedParent);
+		return Node;
+	}
+
+	/**
+	 * Override an inherited component's template on this Blueprint, creating the record if it
+	 * does not exist yet.
+	 *
+	 * Master_Room ships Overlap_Box at 960 x 960 uu and its Arrow at (1000,0,0) -- placeholder
+	 * values far too small for any real room. Every hand-built room overrides both, and a bake
+	 * that did not would emit rooms whose footprint sat inside their own floor.
+	 */
+	UActorComponent* OverrideInherited(UBlueprint& BP, USCS_Node& MasterNode)
+	{
+		UInheritableComponentHandler* Handler = BP.GetInheritableComponentHandler(true);
+		if (Handler == nullptr) { return nullptr; }
+
+		const FComponentKey Key(&MasterNode);
+		if (UActorComponent* Existing = Handler->GetOverridenComponentTemplate(Key))
+		{
+			return Existing;
+		}
+		return Handler->CreateOverridenComponentTemplate(Key);
+	}
+}
+
+bool URoomAuthorTools::BakeAuthoredRoom(UObject* WorldContextObject,
+                                        const URoomRecipeAsset* Recipe,
+                                        TArray<FString>& OutSavedPaths, FString& OutStatus)
+{
+	OutSavedPaths.Reset();
+
+#if WITH_EDITOR
+	if (Recipe == nullptr)
+	{
+		OutStatus = TEXT("REFUSED - there is no recipe to bake.");
+		return false;
+	}
+
+	// The recipe's own faults FIRST, before anything is asked about the world.
+	//
+	// Not cosmetic ordering. These depend on nothing but the recipe, so each reports the SAME
+	// sentence whatever level happens to be open -- which is what lets them be tested at all.
+	// With the level gate in front, a headless run whose startup map is the authoring level
+	// takes a different path from one whose map is anything else, and the guard a test thought
+	// it was exercising is not the guard that fired.
+	const FString RoomName = Recipe->RoomName.ToString();
+	const FString RoomType = Recipe->RoomType.ToString();
+	if (RoomName.IsEmpty() || RoomName == TEXT("None"))
+	{
+		OutStatus = TEXT("REFUSED - the room has no name, and the name is part of its path.");
+		return false;
+	}
+	if (RoomType.IsEmpty() || RoomType == TEXT("None"))
+	{
+		OutStatus = TEXT("REFUSED - the room has no type, and the type is the folder it files under.");
+		return false;
+	}
+
+	// At least one exit, and checked BEFORE anything that could mask it.
+	//
+	// One piece is baked PER EXIT, so a room with none writes nothing at all while reporting
+	// success -- a silent no-op being the worst outcome a bake has. It sits above the
+	// exit-fill guard because that guard asks which parities THIS room's exits need, which is
+	// a vacuous question with no exits, and above ValidateRecipe because a layout fault would
+	// otherwise report first and hide the simpler problem.
+	TArray<RectGen::ERectSide> Entrances;
+	for (int64 S = 0; S < RectGen::NumSides; ++S)
+	{
+		const RectGen::ERectSide Side = static_cast<RectGen::ERectSide>(S);
+		if (Recipe->bExitFor(Side)) { Entrances.Add(Side); }
+	}
+	if (Entrances.Num() == 0)
+	{
+		OutStatus = TEXT("REFUSED - the room has no exits, so there is no side it could be "
+		                 "entered from and no piece to bake.");
+		return false;
+	}
+
+	// The pieces the GENERATOR fills this room's exterior exits with. The room emits BARE GAPS
+	// at its exits, so whatever fills them has to travel with the room.
+	//
+	// WHICH pair is required is a parity question and is answered from the edge, not guessed: a
+	// doorway on an odd edge is one tile and takes the narrow pair, an even edge is two tiles
+	// and takes the wide pair, and a room with an odd width and an even length needs both. Door
+	// and cap are BOTH needed for any enabled exit, because whether that exit ends up connected
+	// or capped is not known until the dungeon solve finishes.
+	{
+		bool bNeedsNarrow = false;
+		bool bNeedsWide = false;
+		for (int64 S = 0; S < RectGen::NumSides; ++S)
+		{
+			const RectGen::ERectSide Side = static_cast<RectGen::ERectSide>(S);
+			if (!Recipe->bExitFor(Side)) { continue; }
+
+			const bool bAlongX = (Side == RectGen::ERectSide::North
+			                   || Side == RectGen::ERectSide::South);
+			const int64 EdgeTiles = bAlongX ? Recipe->BoundingWidth : Recipe->BoundingLength;
+			if (RectGen::EdgeUsesWideDoor(EdgeTiles)) { bNeedsWide = true; }
+			else                                      { bNeedsNarrow = true; }
+		}
+
+		const TCHAR* Missing = nullptr;
+		if (bNeedsNarrow)
+		{
+			if      (!Recipe->ResolveDoor().IsValid())    { Missing = TEXT("Door"); }
+			else if (!Recipe->ResolveWallCap().IsValid()) { Missing = TEXT("WallCap"); }
+		}
+		if (Missing == nullptr && bNeedsWide)
+		{
+			if      (Recipe->DoorWideCls.IsNull())    { Missing = TEXT("DoorWide"); }
+			else if (Recipe->WallCapWideCls.IsNull()) { Missing = TEXT("WallCapWide"); }
+		}
+		if (Missing != nullptr)
+		{
+			OutStatus = FString::Printf(
+				TEXT("REFUSED - %s is not set. This room's exterior exits are bare gaps that the "
+				     "dungeon generator fills at assembly, so the pieces it fills them with have "
+				     "to be on the recipe or its kit set. Set it under Room|Exits."),
+				Missing);
+			return false;
+		}
+	}
+
+	FString LayoutError;
+	if (!Recipe->ValidateRecipe(LayoutError))
+	{
+		OutStatus = FString::Printf(TEXT("REFUSED - %s"), *LayoutError);
+		return false;
+	}
+
+	FString MasterError;
+	UBlueprint* MasterRoom = LoadMasterRoom(MasterError);
+	if (MasterRoom == nullptr) { OutStatus = MasterError; return false; }
+
+	USCS_Node* MasterExits = FindMasterNode(*MasterRoom, ExitsFolderName);
+	USCS_Node* MasterFloorPoints = FindMasterNode(*MasterRoom, FloorPointsName);
+	USCS_Node* MasterGeometry = FindMasterNode(*MasterRoom, GeometryFolderName);
+	USCS_Node* MasterArrow = FindMasterNode(*MasterRoom, ArrowName);
+	USCS_Node* MasterOverlapBox = FindMasterNode(*MasterRoom, OverlapBoxName);
+	if (MasterExits == nullptr || MasterFloorPoints == nullptr || MasterGeometry == nullptr
+		|| MasterArrow == nullptr || MasterOverlapBox == nullptr)
+	{
+		OutStatus = FString::Printf(
+			TEXT("REFUSED - Master_Room is missing one of the components a baked room attaches "
+			     "to (%s, %s, %s, %s, %s). Its structure has changed and the bake would put this "
+			     "room's exits somewhere the generator does not look."),
+			ExitsFolderName, FloorPointsName, GeometryFolderName, ArrowName, OverlapBoxName);
+		return false;
+	}
+
+	FString OpenLevel;
+	if (!IsAuthoringLevelOpen(WorldContextObject, OpenLevel))
+	{
+		OutStatus = FString::Printf(
+			TEXT("REFUSED - the open level is %s. Authoring only ever bakes what is standing "
+			     "in %s."),
+			*OpenLevel, AuthoringLevelPath());
+		return false;
+	}
+
+	UWorld* World = EditorWorld(WorldContextObject);
+	if (World == nullptr)
+	{
+		OutStatus = TEXT("REFUSED - there is no editor world to bake from.");
+		return false;
+	}
+
+	// The room is generated CENTRED on the world origin -- see ChamberCentreUU, which subtracts
+	// half the bounding rect from every chamber -- so its min corner is half the rect back along
+	// each axis. That corner is the AUTHORED frame's origin, and everything below rebases out
+	// of it. Z is left alone because the chamber volumes sit at z 0 and the graph builds upward,
+	// so the floor already is the room's zero.
+	const double Tile = static_cast<double>(RectGen::TileUU);
+	const FVector RoomOrigin(-0.5 * Recipe->BoundingWidth * Tile,
+	                         -0.5 * Recipe->BoundingLength * Tile,
+	                         0.0);
+
+	TArray<FAuthoredMesh> Meshes;
+	TArray<FAuthoredFixture> Fixtures;
+	CollectPlacedMeshes(World, RoomOrigin, Meshes, Fixtures);
+
+	// BOTH empty, not just the meshes. A prop carrying a light is collected as a fixture and
+	// contributes no mesh, so a level holding only such actors reports zero meshes while plainly
+	// having something standing in it.
+	if (Meshes.Num() == 0 && Fixtures.Num() == 0)
+	{
+		OutStatus = TEXT("REFUSED - nothing generated is standing in the level, so there is no "
+		                 "body to bake. Press Regenerate first.");
+		return false;
+	}
+
+	// Floor spawn points, straight off the chamber grid. Every tile of every chamber has floor
+	// under it by construction, so the candidate set costs nothing to produce -- the grid
+	// already exists. Collected once in the AUTHORED frame and rebased per piece below.
+	TArray<FVector> FloorPointsAuthored;
+	{
+		RoomAuthor::FRoomLayout Layout;
+		Recipe->MakeLayout(Layout);
+		for (const RoomAuthor::FChamberRect& C : Layout.Chambers)
+		{
+			for (int64 Ty = C.MinY(); Ty < C.MaxY(); ++Ty)
+			{
+				for (int64 Tx = C.MinX(); Tx < C.MaxX(); ++Tx)
+				{
+					// Tile CENTRE, not its min corner: a spawn point on a tile boundary sits
+					// half inside the neighbouring tile and, on a perimeter tile, inside a wall.
+					FloorPointsAuthored.Add(FVector(
+						(static_cast<double>(Tx) + 0.5) * Tile,
+						(static_cast<double>(Ty) + 0.5) * Tile,
+						0.0));
+				}
+			}
+		}
+	}
+
+	const FString Folder = FString(URectRoomTools::RoomLibraryRoot()) / RoomType;
+	int32 PiecesWritten = 0;
+
+	for (const RectGen::ERectSide Entrance : Entrances)
+	{
+		// Named for the side ENTERED FROM, so the set of pieces a room bakes to is legible in
+		// the content browser and a re-bake overwrites its own previous output rather than
+		// accumulating.
+		const FString BPName = FString::Printf(TEXT("BP_Room_%s_%s"),
+			*RoomName, RoomAuthor::SideName(Entrance));
+		const FString BPPackageName = Folder / BPName;
+
+		UPackage* BPPackage = CreatePackage(*BPPackageName);
+		if (BPPackage == nullptr)
+		{
+			OutStatus = FString::Printf(TEXT("REFUSED - could not create the package %s."),
+				*BPPackageName);
+			return false;
+		}
+		BPPackage->FullyLoad();
+
+		// Reuse an existing piece rather than re-creating it: FKismetEditorUtilities::
+		// CreateBlueprint asserts that no Blueprint of this name exists in the outer, so calling
+		// it unconditionally turns the ordinary edit-and-rebake loop into a hard editor crash
+		// instead of a refusal.
+		UBlueprint* BP = FindObject<UBlueprint>(BPPackage, *BPName);
+		const bool bIsNew = (BP == nullptr);
+		if (BP == nullptr)
+		{
+			BP = FKismetEditorUtilities::CreateBlueprint(
+				MasterRoom->GeneratedClass, BPPackage, FName(*BPName),
+				BPTYPE_Normal, UBlueprint::StaticClass(), UBlueprintGeneratedClass::StaticClass());
+		}
+		else
+		{
+			ClearBakedNodes(*BP);
+		}
+		if (BP == nullptr)
+		{
+			OutStatus = FString::Printf(TEXT("REFUSED - could not create %s."), *BPName);
+			return false;
+		}
+
+		const FTransform Frame = BakeFrameFor(Recipe->BoundingWidth, Recipe->BoundingLength,
+		                                      Entrance);
+
+		int64 AlongTiles = 0, AcrossTiles = 0;
+		RoomAuthor::BakedExtentTiles(Recipe->BoundingWidth, Recipe->BoundingLength, Entrance,
+		                             AlongTiles, AcrossTiles);
+
+		// ---- the body
+
+		int32 PieceIndex = 0;
+		for (const FAuthoredMesh& M : Meshes)
+		{
+			USCS_Node* Node = AddNodeUnder(*BP, UStaticMeshComponent::StaticClass(),
+				FName(*FString::Printf(TEXT("%s%d"),
+					URectRoomTools::BakedPiecePrefix(), PieceIndex++)),
+				*MasterGeometry);
+			if (Node == nullptr) { continue; }
+
+			UStaticMeshComponent* SMC = CastChecked<UStaticMeshComponent>(Node->ComponentTemplate);
+			SMC->SetStaticMesh(M.Mesh);
+			SMC->SetRelativeTransform(M.Xf * Frame);
+		}
+
+		// The live half. A child actor rather than copied light and particle components, because
+		// the prop is a Blueprint with its own construction script -- copying two components off
+		// it would capture what it looks like today and drop everything else it does.
+		int32 FixtureIndex = 0;
+		for (const FAuthoredFixture& F : Fixtures)
+		{
+			if (F.Class == nullptr) { continue; }
+
+			USCS_Node* Node = AddNodeUnder(*BP, UChildActorComponent::StaticClass(),
+				FName(*FString::Printf(TEXT("%s%d"),
+					URectRoomTools::BakedFixturePrefix(), FixtureIndex++)),
+				*MasterGeometry);
+			if (Node == nullptr) { continue; }
+
+			UChildActorComponent* CAC = CastChecked<UChildActorComponent>(Node->ComponentTemplate);
+			CAC->SetChildActorClass(F.Class);
+			CAC->SetRelativeTransform(F.Xf * Frame);
+		}
+
+		// ---- the exits
+		//
+		// EVERY enabled exit gets an arrow, the entrance included -- 1_Room1 carries four for
+		// four exits, one of them at the origin. The generator reads these to know where this
+		// piece can be joined to the next, so an entrance with no arrow is a room that can be
+		// entered and never left.
+		int32 ExitIndex = 0;
+		for (const RectGen::ERectSide Side : Entrances)
+		{
+			int64 Ax = 0, Ay = 0;
+			RoomAuthor::ExitMidpointUU(Recipe->BoundingWidth, Recipe->BoundingLength, Side, Ax, Ay);
+
+			int64 Bx = 0, By = 0;
+			RoomAuthor::RebaseToEntranceUU(Recipe->BoundingWidth, Recipe->BoundingLength,
+			                               Entrance, Ax, Ay, Bx, By);
+
+			USCS_Node* Node = AddNodeUnder(*BP, UArrowComponent::StaticClass(),
+				FName(*FString::Printf(TEXT("Exit_%d_%s"), ExitIndex++, RoomAuthor::SideName(Side))),
+				*MasterExits);
+			if (Node == nullptr) { continue; }
+
+			// Yawed to face OUT of the room along its own edge, so the generator can align the
+			// next piece's entrance against it rather than having to infer a direction.
+			const int32 OutwardYaw =
+				RoomAuthor::BakeYawDegreesFor(Side) - RoomAuthor::BakeYawDegreesFor(Entrance);
+
+			USceneComponent* Arrow = CastChecked<USceneComponent>(Node->ComponentTemplate);
+			Arrow->SetRelativeTransform(FTransform(
+				FRotator(0.0, static_cast<double>(OutwardYaw), 0.0),
+				FVector(static_cast<double>(Bx), static_cast<double>(By), 0.0)));
+		}
+
+		// ---- the floor spawn points
+
+		int32 FloorIndex = 0;
+		for (const FVector& P : FloorPointsAuthored)
+		{
+			USCS_Node* Node = AddNodeUnder(*BP, UArrowComponent::StaticClass(),
+				FName(*FString::Printf(TEXT("FloorPoint_%d"), FloorIndex++)),
+				*MasterFloorPoints);
+			if (Node == nullptr) { continue; }
+
+			USceneComponent* Point = CastChecked<USceneComponent>(Node->ComponentTemplate);
+			Point->SetRelativeTransform(FTransform(P) * Frame);
+		}
+
+		// ---- the inherited overrides
+
+		const double AlongUU = static_cast<double>(AlongTiles) * Tile;
+		const double AcrossUU = static_cast<double>(AcrossTiles) * Tile;
+
+		if (UActorComponent* ArrowTemplate = OverrideInherited(*BP, *MasterArrow))
+		{
+			// The room's centre, matching every hand-built room: 1_Room1 is 4000 long and puts
+			// its Arrow at (2000, 0, 0).
+			if (USceneComponent* Scene = Cast<USceneComponent>(ArrowTemplate))
+			{
+				Scene->SetRelativeLocation(FVector(AlongUU * 0.5, 0.0, 0.0));
+			}
+		}
+
+		if (UActorComponent* BoxTemplate = OverrideInherited(*BP, *MasterOverlapBox))
+		{
+			if (UBoxComponent* Box = Cast<UBoxComponent>(BoxTemplate))
+			{
+				// Whole scale units that fit inside the footprint, then one unit back off. See
+				// OverlapBoxBackoffUnits -- this reproduces both measured rooms exactly.
+				const int32 ScaleX = FMath::Max(1, FMath::FloorToInt32(
+					(AlongUU * 0.5) / OverlapBoxUnitUU) - OverlapBoxBackoffUnits);
+				const int32 ScaleY = FMath::Max(1, FMath::FloorToInt32(
+					(AcrossUU * 0.5) / OverlapBoxUnitUU) - OverlapBoxBackoffUnits);
+
+				Box->SetRelativeLocation(FVector(AlongUU * 0.5, 0.0, OverlapBoxZUU));
+				Box->SetRelativeScale3D(FVector(ScaleX, ScaleY, 1.0));
+			}
+		}
+
+		FKismetEditorUtilities::CompileBlueprint(BP);
+		if (bIsNew) { FAssetRegistryModule::AssetCreated(BP); }
+		BPPackage->MarkPackageDirty();
+
+		OutSavedPaths.Add(BPPackageName);
+		++PiecesWritten;
+	}
+
+	OutStatus = FString::Printf(
+		TEXT("OK - baked %d piece%s into %s: %d mesh(es), %d live fixture(s) and %d floor spawn "
+		     "point%s each, one piece per exit."),
+		PiecesWritten, PiecesWritten == 1 ? TEXT("") : TEXT("s"), *Folder,
+		Meshes.Num(), Fixtures.Num(), FloorPointsAuthored.Num(),
+		FloorPointsAuthored.Num() == 1 ? TEXT("") : TEXT("s"));
+	return true;
+#else
+	OutStatus = TEXT("REFUSED - room authoring is an editor-only tool.");
+	return false;
+#endif
+}
+
 // resolved openings, and the kit-set piece resolution below.
 
 namespace

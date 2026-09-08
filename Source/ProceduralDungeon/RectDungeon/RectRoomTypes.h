@@ -56,6 +56,9 @@ namespace RectGen
 		return (TileCount % 2 != 0) ? (TileUU / 2) : TileUU;
 	}
 
+	/** True when this edge's doorway is the two-tile one, and so needs the WIDE door piece. */
+	FORCEINLINE bool EdgeUsesWideDoor(int64 TileCount) { return (TileCount % 2) == 0; }
+
 	/**
 	 * The doorway's span along its own edge, in the room's local frame.
 	 *

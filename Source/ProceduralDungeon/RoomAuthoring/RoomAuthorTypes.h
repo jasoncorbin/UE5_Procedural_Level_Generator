@@ -237,6 +237,107 @@ namespace RoomAuthor
 		OutHi = RectGen::ExitSpanHiUU(TileCount) / RectGen::TileUU;
 	}
 
+	// --- The baked frame ----------------------------------------------------------------------
+	//
+	// A room piece has exactly ONE entrance, and it sits at the piece's own origin. That is
+	// structural, not a convention: the generator deferred-spawns each room at the selected
+	// exit's world transform, so a piece pivoted anywhere else would drop that part of itself
+	// onto the doorway. Measured against 1_Room1, whose entrance arrow sits at exactly (0,0,0)
+	// while its other three sit at (4000,0), (2000,2000) and (2000,-2000).
+	//
+	// So a room authored with N exits bakes to N pieces, each rebased so a DIFFERENT exit is the
+	// entrance. These functions are that rebasing, kept pure and integer so the whole scheme is
+	// testable without an editor.
+	//
+	// The baked frame: entrance at the origin, the room extending along +X, centred on Y=0.
+
+	/**
+	 * The midpoint of one edge of a WidthTiles x LengthTiles room, in the AUTHORED frame --
+	 * min corner at the origin, width along +X, length along +Y.
+	 *
+	 * North and South run along X and are WidthTiles long; East and West run along Y and are
+	 * LengthTiles long. The same pairing FChamberRect::TileCountOnSide uses, and the midpoint is
+	 * RectGen::ExitCentreUU rather than a second formula, because this is THE CONNECTION POINT
+	 * the generator joins rooms at.
+	 */
+	FORCEINLINE void ExitMidpointUU(int64 WidthTiles, int64 LengthTiles, RectGen::ERectSide Side,
+	                                int64& OutX, int64& OutY)
+	{
+		const int64 SpanX = WidthTiles * RectGen::TileUU;
+		const int64 SpanY = LengthTiles * RectGen::TileUU;
+		switch (Side)
+		{
+		case RectGen::ERectSide::South: OutX = RectGen::ExitCentreUU(WidthTiles);  OutY = 0;     return;
+		case RectGen::ERectSide::North: OutX = RectGen::ExitCentreUU(WidthTiles);  OutY = SpanY; return;
+		case RectGen::ERectSide::West:  OutX = 0;     OutY = RectGen::ExitCentreUU(LengthTiles); return;
+		case RectGen::ERectSide::East:  OutX = SpanX; OutY = RectGen::ExitCentreUU(LengthTiles); return;
+		}
+		OutX = 0;
+		OutY = 0;
+	}
+
+	/**
+	 * The yaw, in whole degrees, that turns the room so the given entrance faces -X and the
+	 * room body extends along +X.
+	 *
+	 * Whole degrees and an integer return, because these four are the only values there are:
+	 * the interior lies opposite the entrance, so each side needs exactly one quarter turn.
+	 * A float here would invite an interpolation that has no meaning.
+	 */
+	FORCEINLINE int32 BakeYawDegreesFor(RectGen::ERectSide Entrance)
+	{
+		switch (Entrance)
+		{
+		case RectGen::ERectSide::West:  return 0;    // interior already lies along +X
+		case RectGen::ERectSide::East:  return 180;  // interior lies along -X
+		case RectGen::ERectSide::South: return -90;  // interior lies along +Y
+		case RectGen::ERectSide::North: return 90;   // interior lies along -Y
+		}
+		return 0;
+	}
+
+	/**
+	 * One authored-frame point, moved into the baked frame for the given entrance.
+	 *
+	 * Translate the entrance's midpoint to the origin, then quarter-turn. Exact in integers at
+	 * every step -- the rotation is a swap and a negation, never a trig call, which is what
+	 * keeps a baked piece landing on whole tiles.
+	 */
+	FORCEINLINE void RebaseToEntranceUU(int64 WidthTiles, int64 LengthTiles,
+	                                    RectGen::ERectSide Entrance,
+	                                    int64 InX, int64 InY, int64& OutX, int64& OutY)
+	{
+		int64 Mx = 0, My = 0;
+		ExitMidpointUU(WidthTiles, LengthTiles, Entrance, Mx, My);
+		const int64 X = InX - Mx;
+		const int64 Y = InY - My;
+
+		switch (BakeYawDegreesFor(Entrance))
+		{
+		case 0:   OutX =  X; OutY =  Y; return;
+		case 90:  OutX = -Y; OutY =  X; return;
+		case 180: OutX = -X; OutY = -Y; return;
+		default:  OutX =  Y; OutY = -X; return;  // -90
+		}
+	}
+
+	/**
+	 * The room's extent in the baked frame: how far it reaches along +X from the entrance, and
+	 * how wide it is across, both in TILES.
+	 *
+	 * Entering from a North or South edge swaps the two, because the axis you walk in along is
+	 * the room's length rather than its width.
+	 */
+	FORCEINLINE void BakedExtentTiles(int64 WidthTiles, int64 LengthTiles,
+	                                  RectGen::ERectSide Entrance,
+	                                  int64& OutAlong, int64& OutAcross)
+	{
+		const bool bAlongX = (Entrance == RectGen::ERectSide::East
+		                   || Entrance == RectGen::ERectSide::West);
+		OutAlong  = bAlongX ? WidthTiles  : LengthTiles;
+		OutAcross = bAlongX ? LengthTiles : WidthTiles;
+	}
+
 	/**
 	 * The doorway's tile span inside an arbitrary shared run [RunLo, RunHi), in the same room
 	 * tile coordinates the run is given in.

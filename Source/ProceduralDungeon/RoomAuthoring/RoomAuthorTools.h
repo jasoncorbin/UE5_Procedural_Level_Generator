@@ -223,14 +223,29 @@ public:
 	                                  FString& OutStatus);
 
 	/**
-	 * BakeAuthoredRoom and ApplyExitContractToAsset are DELIBERATELY ABSENT -- step 6.
+	 * Bake what is STANDING IN THE LEVEL into room pieces the dungeon generator can place.
 	 *
-	 * Level_Creator_1 declared them here and wrote a URectRoomAsset plus a baked prefab
-	 * beside it. This project's rooms are Master_Room_C children, so the bake's OUTPUT half
-	 * is a rewrite against a different contract rather than a port. Its INPUT half -- the
-	 * validated layout, the resolved openings, kit-set piece resolution -- is all present and
-	 * tested below.
+	 * Writes Master_Room_C children, ONE PER EXIT. A room piece has exactly one entrance and it
+	 * sits at the piece's own origin, so a room authored with N exits bakes to N Blueprints,
+	 * each rebased so a different exit is the entrance. They land in
+	 * <RoomLibraryRoot>/<RoomType>/ as BP_Room_<RoomName>_<Side>.
+	 *
+	 * It bakes THE LEVEL, not the recipe. That is the point and also the trap: anything
+	 * hand-moved after the last Regenerate is captured here and is NOT in the recipe, so a
+	 * later Load followed by Regenerate silently drops it. Save the recipe and bake in the same
+	 * pass, or treat the pieces as the authority from then on.
+	 *
+	 * REFUSES, without writing anything, on: no recipe; an unnamed or untyped room, both of
+	 * which are path components; missing exit-fill pieces for the parities this room's exits
+	 * actually need; a recipe that does not validate; a room with no exits at all; a
+	 * Master_Room that will not load or has lost one of the components a piece attaches to; the
+	 * wrong level open; and an empty level, which almost always means Regenerate was not pressed.
+	 *
+	 * @param OutSavedPaths one package path per piece written. Empty on refusal.
 	 */
+	UFUNCTION(BlueprintCallable, Category = "Room Authoring|Recipe")
+	static bool BakeAuthoredRoom(UObject* WorldContextObject, const URoomRecipeAsset* Recipe,
+	                             TArray<FString>& OutSavedPaths, FString& OutStatus);
 
 	/**
 	 * Does this component emit something a baked static mesh cannot reproduce?
