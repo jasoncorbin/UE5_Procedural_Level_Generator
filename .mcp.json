@@ -1,12 +1,8 @@
-﻿{
+{
   "mcpServers": {
-    "mcp-unreal": {
-      "type": "stdio",
-      "command": "C:\\Users\\Jason\\go\\bin\\mcp-unreal.exe",
-      "env": {
-        "MCP_UNREAL_PROJECT": "E:\\UE5 Projects\\UE5_Procedural_Level_Generator\\Procedural_Dongeon.uproject",
-        "MCP_UNREAL_DOCS_INDEX": "D:\\mcp-unreal\\docs\\index.bleve"
-      }
+    "unreal": {
+      "type": "http",
+      "url": "http://localhost:8000/mcp"
     }
   }
 }
