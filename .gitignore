@@ -87,3 +87,5 @@ DerivedDataCache/
 # Never ignore git files
 !.gitignore
 !.gitattributes
+# Session transcripts
+transcript.txt
