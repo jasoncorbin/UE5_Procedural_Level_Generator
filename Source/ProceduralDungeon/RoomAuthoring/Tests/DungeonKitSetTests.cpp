@@ -146,18 +146,34 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRecipeWithNoKitSetKeepsItsOwnValues,
 
 bool FRecipeWithNoKitSetKeepsItsOwnValues::RunTest(const FString&)
 {
-	// The migration story. A recipe saved before kit sets existed has a null KitSet and every
-	// slot filled, and must keep resolving to precisely what it was saved with -- the same
-	// guarantee AttachParent's -1 default gives attachments.
+	// The migration story, and the fallback that makes an authored kit asset optional.
+	//
+	// A recipe saved before kit sets existed has a null KitSet and its own chamber pieces. Those
+	// must keep resolving to exactly what was saved -- the same guarantee AttachParent's -1
+	// default gives attachments -- while the slots it never had fall back to the built-in
+	// census kit rather than to nothing.
+	//
+	// That fallback is not a convenience. Without it, a null KitSet resolves every unfilled slot
+	// to an empty path, and since a pre-kit-set recipe carries no exit fills at all, EVERY such
+	// room is refused by the bake for a missing Door -- which is exactly what
+	// DA_RoomRecipe_Sample_TwoChamber did.
 	URoomRecipeAsset* Recipe = NewObject<URoomRecipeAsset>();
 	Recipe->Chambers.Add(FRoomChamber());
 	Recipe->Chambers[0].WallCls = FSoftClassPath(SomeOtherWall);
 
 	TestTrue(TEXT("no kit set is a legal state"), Recipe->KitSet == nullptr);
-	TestEqual(TEXT("the chamber's own value survives"),
+	TestEqual(TEXT("the chamber's own value still wins"),
 		Recipe->ResolveWall(Recipe->Chambers[0]).ToString(), FString(SomeOtherWall));
-	TestTrue(TEXT("an unset slot with no kit resolves to empty rather than crashing"),
-		Recipe->ResolveFloor(Recipe->Chambers[0]).ToString().IsEmpty());
+
+	const UDungeonKitSet* Census = GetDefault<UDungeonKitSet>();
+	TestEqual(TEXT("an unset slot falls back to the built-in kit"),
+		Recipe->ResolveFloor(Recipe->Chambers[0]).ToString(), Census->Floor.ToString());
+	TestEqual(TEXT("and so do the exit fills a legacy recipe never had"),
+		Recipe->ResolveDoor().ToString(), Census->Door.ToString());
+	TestEqual(TEXT("including the cap, which is not the door"),
+		Recipe->ResolveWallCap().ToString(), Census->WallCap.ToString());
+	TestNotEqual(TEXT("door and cap stay distinct through the fallback"),
+		Recipe->ResolveDoor().ToString(), Recipe->ResolveWallCap().ToString());
 
 	return true;
 }

@@ -345,23 +345,43 @@ public:
 	TArray<FRoomConnection> Connections;
 
 	/**
+	 * The kit this room resolves against: the one it names, or the built-in default.
+	 *
+	 * A NULL KitSet FALLS BACK TO THE CLASS DEFAULT, which carries the six-asset census in its
+	 * constructor. That is deliberate and it is what makes a DA_KitSet_* asset a convenience
+	 * rather than a prerequisite -- the whole reason the census ships as constructor defaults
+	 * instead of as content. Without this fallback every room in the project would need an
+	 * authored kit asset before it could bake, which is precisely the requirement the
+	 * constructor defaults exist to avoid.
+	 *
+	 * It also rescues recipes written before kit sets existed. Those carry their own chamber
+	 * pieces, which still win as overrides, but carry nothing for the exit fills the generator
+	 * needs -- so before this they could not bake at all.
+	 *
+	 * Naming a kit is therefore how a room DIFFERS from the project default, not how it gets
+	 * pieces in the first place.
+	 */
+	const UDungeonKitSet& EffectiveKit() const
+	{
+		return KitSet ? *KitSet : *GetDefault<UDungeonKitSet>();
+	}
+
+	/**
 	 * Every piece this room is built from, override resolved against the kit set.
 	 *
 	 * These accessors exist so no caller reads a raw slot. Reading FRoomChamber::WallCls
 	 * directly gets the OVERRIDE, which is empty on almost every chamber of a room that uses a
 	 * set -- a caller that does it once and works by luck on a fully-overridden legacy recipe
 	 * is the failure mode these are here to remove.
-	 *
-	 * A null KitSet resolves to the override alone, which is what a pre-kit-set recipe wants.
 	 */
 	FSoftClassPath ResolveWall(const FRoomChamber& Chamber) const
 	{
-		return UDungeonKitSet::PickClass(Chamber.WallCls, KitSet ? KitSet->Wall : FSoftClassPath());
+		return UDungeonKitSet::PickClass(Chamber.WallCls, EffectiveKit().Wall);
 	}
 
 	FSoftClassPath ResolveFloor(const FRoomChamber& Chamber) const
 	{
-		return UDungeonKitSet::PickClass(Chamber.FloorCls, KitSet ? KitSet->Floor : FSoftClassPath());
+		return UDungeonKitSet::PickClass(Chamber.FloorCls, EffectiveKit().Floor);
 	}
 
 	/**
@@ -392,25 +412,24 @@ public:
 	                             RectGen::ERectCornerIndex Corner) const
 	{
 		return UDungeonKitSet::PickClass(CornerOverrideFor(Chamber, Corner),
-			KitSet ? KitSet->Corner : FSoftClassPath());
+		                                 EffectiveKit().Corner);
 	}
 
 	FSoftObjectPath ResolveCeilingMesh(const FRoomChamber& Chamber) const
 	{
-		return UDungeonKitSet::PickObject(Chamber.CeilingMesh,
-			KitSet ? KitSet->CeilingMesh : FSoftObjectPath());
+		return UDungeonKitSet::PickObject(Chamber.CeilingMesh, EffectiveKit().CeilingMesh);
 	}
 
 	/** The passable door the GENERATOR fills a connected exterior exit with. */
 	FSoftClassPath ResolveDoor() const
 	{
-		return UDungeonKitSet::PickClass(DoorCls, KitSet ? KitSet->Door : FSoftClassPath());
+		return UDungeonKitSet::PickClass(DoorCls, EffectiveKit().Door);
 	}
 
 	/** The solid filler the GENERATOR seals an unconnected exterior exit with. Not a door. */
 	FSoftClassPath ResolveWallCap() const
 	{
-		return UDungeonKitSet::PickClass(WallCapCls, KitSet ? KitSet->WallCap : FSoftClassPath());
+		return UDungeonKitSet::PickClass(WallCapCls, EffectiveKit().WallCap);
 	}
 
 	/**

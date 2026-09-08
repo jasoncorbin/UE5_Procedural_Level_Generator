@@ -108,21 +108,34 @@ bool FBakeRefusesMissingExitFills::RunTest(const FString&)
 	FString Status;
 
 	// A 5-wide room exiting North: the North edge runs along X and is 5 tiles, which is odd, so
-	// it needs the NARROW pair. With no kit set and nothing set by hand, Door is missing.
+	// it needs the NARROW pair.
+	//
+	// Emptying the kit's Door is what it takes to reach this refusal now. A recipe with no kit
+	// set at all falls back to the built-in census kit, which HAS a door -- so the naive
+	// fixture, a recipe with nothing set anywhere, sails past this guard. That fallback is the
+	// point: it is what lets a room bake without an authored kit asset first.
 	URoomRecipeAsset* Narrow = MakeUnbakeableRecipe();
-	Narrow->KitSet = nullptr;
-	TestFalse(TEXT("a room with no narrow door is refused"),
+	Narrow->KitSet = NewObject<UDungeonKitSet>();
+	Narrow->KitSet->Door = FSoftClassPath();
+	TestFalse(TEXT("a room whose kit has no narrow door is refused"),
 		URoomAuthorTools::BakeAuthoredRoom(nullptr, Narrow, Paths, Status));
 	TestTrue(TEXT("the refusal names Door"), Status.Contains(TEXT("Door")));
 
-	// The kit set supplies Door and WallCap, so the same room gets past the narrow check and
-	// fails later instead -- which is what proves the kit is actually consulted here rather
-	// than the raw slot.
+	// The same room with an intact kit gets past the narrow check and fails later instead,
+	// which is what proves the kit is consulted here rather than the raw slot.
 	URoomRecipeAsset* Kitted = MakeUnbakeableRecipe();
 	TestFalse(TEXT("still refused, but not for a missing Door"),
 		URoomAuthorTools::BakeAuthoredRoom(nullptr, Kitted, Paths, Status));
 	TestFalse(TEXT("the kit set satisfied the narrow pair"),
 		Status.Contains(TEXT("Door is not set")));
+
+	// And with NO kit set at all, the built-in census fills the same gap -- the case
+	// DA_RoomRecipe_Sample_TwoChamber hit, where a pre-kit-set recipe could not bake.
+	URoomRecipeAsset* Legacy = MakeUnbakeableRecipe();
+	Legacy->KitSet = nullptr;
+	TestFalse(TEXT("a legacy recipe is still refused for its shape"),
+		URoomAuthorTools::BakeAuthoredRoom(nullptr, Legacy, Paths, Status));
+	TestFalse(TEXT("but no longer for a missing Door"), Status.Contains(TEXT("Door is not set")));
 
 	// An EVEN edge needs the wide pair, and the kit set deliberately has no wide door -- the
 	// census contained none, so guessing one is exactly what UDungeonKitSet refuses to do.
