@@ -252,8 +252,12 @@ would stop following its kit, which is the exact duplication kit sets remove.
   its own commit, is still the right shape.
 - **The `.uproject` is LFS-tracked** (`*.uproject filter=lfs` in `.gitattributes`). A clone
   without LFS installed gets a pointer file and cannot open the project.
-- Untracked throwaways from tonight's testing: `Content/RectDungeon/Rooms/Generic/` — one recipe
-  and four baked rooms. Delete or commit.
+- **Decide whether baked rooms belong in git.** They are DERIVED data — the bake regenerates
+  them wholesale — and each is ~1.1 MB of LFS. Four accidentally landed in `f331996` and were
+  untracked again in the commit after it; the room library is otherwise unversioned. Tonight's
+  throwaways (`Room_New`, `Room_New2` and their pieces) are on disk and ignored by git. Either
+  version the library deliberately or add `Content/RectDungeon/Rooms/` to `.gitignore` — the
+  current state is "neither", which is the one state that will surprise someone.
 - `magic` MCP server fails to connect (API key reset). Unrelated to this work.
 
 ---

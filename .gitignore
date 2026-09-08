@@ -92,3 +92,7 @@ transcript.txt
 
 # Generated per-machine by UnrealBuildTool project generation
 .vscode/compileCommands_*
+
+# Baked room pieces are derived data -- the bake regenerates them wholesale, and each is
+# ~1.1 MB of LFS. See the backlog note in NEXT-SESSION.md before changing this.
+Content/RectDungeon/Rooms/Generic/BP_Room_*
