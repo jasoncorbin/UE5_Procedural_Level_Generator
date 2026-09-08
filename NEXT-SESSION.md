@@ -8,7 +8,7 @@
 
 ## Where things stand
 
-Branch `port/room-authoring`, 16 commits, tree clean. **Steps 1–6 done. Step 7 remains.**
+Branch `port/room-authoring`, 18 commits. **Steps 1–6 done. Step 7 remains.**
 
 An authored room now bakes straight into v1's `Master_Room` contract and the pieces drop into
 the existing Blueprint generator with no converter. That was the point of the whole port, and
