@@ -264,6 +264,15 @@ would stop following its kit, which is the exact duplication kit sets remove.
 
 ## Traps
 
+- **Check `git status` before every commit on this branch.** Two commits picked up baked
+  Blueprints nobody staged on purpose — `f331996` (meant to add one test file) and `b59b9ef`
+  (meant to add one markdown file), 4.5 MB of LFS each time. Both were baked while a commit was
+  being prepared. The mechanism was NOT determined; `git config` shows nothing unusual and the
+  `git add` pathspecs named only `Source/` and the one file. An audit of every Content-touching
+  commit on the branch found only these two, both since untracked, and the three deliberate
+  content commits are correct. Until the cause is known, verify what is staged rather than
+  trusting the pathspec.
+
 - **Live Coding is not a build.** It patched four changes tonight and refused two. When it
   refuses, its message is useless — build properly to see the real error. And a "successful"
   headless test run right after a *failed* build is running the **stale DLL**; it means nothing.
