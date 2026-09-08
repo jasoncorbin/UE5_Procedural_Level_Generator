@@ -6,10 +6,13 @@
 #if WITH_DEV_AUTOMATION_TESTS
 
 // DELIBERATELY NO `using namespace`. RectGen and RoomAuthor both name a tile grid, both talk
-// about sides, and both will grow constants -- so every symbol below is qualified. The module
-// builds with bUseUnity = false partly because unqualified namespace pulls in test files are
-// how two same-named symbols end up in one merged translation unit and MSVC reports C2872.
-// Qualifying is what makes that stay true no matter what either namespace grows next.
+// about sides, and both will grow constants -- so every symbol below is qualified.
+//
+// Level_Creator_1's copy of this note added that its module built with bUseUnity = false,
+// which helped. THIS MODULE BUILDS WITH UNITY ON, so qualifying matters more here, not less:
+// unity is precisely the thing that merges several .cpp files into one translation unit, and
+// an unqualified namespace pull is how two same-named symbols land in one and MSVC reports
+// C2872. Qualifying is what makes that stay true no matter what either namespace grows next.
 
 namespace
 {
