@@ -900,6 +900,74 @@ bool URoomAuthorTools::IsLiveFixtureComponent(const UActorComponent* Component)
 	    || Component->IsA<UDecalComponent>();
 }
 
+#if WITH_EDITOR
+namespace
+{
+	/**
+	 * Console commands, so the tool can be driven before the widget is rewired.
+	 *
+	 * EUW_RoomAuthor came across from Level_Creator_1 and still calls the OLD BakeAuthoredRoom,
+	 * which returned one path; this one returns a list, because it writes a piece per exit. Until
+	 * step 7 reconnects that button these two are the only way to exercise the real pipeline in a
+	 * real editor -- and being console commands, they also work in a -ExecCmds run.
+	 *
+	 * Both take an asset path and print to the log rather than returning anything, because the
+	 * status string is the interesting output and a console command has nowhere else to put it.
+	 */
+	URoomRecipeAsset* LoadRecipeForCommand(const TArray<FString>& Args)
+	{
+		if (Args.Num() < 1)
+		{
+			UE_LOG(LogTemp, Error,
+				TEXT("Usage: <command> /Game/Path/DA_MyRecipe.DA_MyRecipe"));
+			return nullptr;
+		}
+		URoomRecipeAsset* Recipe = LoadObject<URoomRecipeAsset>(nullptr, *Args[0]);
+		if (Recipe == nullptr)
+		{
+			UE_LOG(LogTemp, Error, TEXT("Could not load a room recipe at %s"), *Args[0]);
+		}
+		return Recipe;
+	}
+
+	FAutoConsoleCommand CommandGenerate(
+		TEXT("ProceduralDungeon.Author.Generate"),
+		TEXT("Regenerate the authoring level from a recipe asset. Arg: the recipe's object path."),
+		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+		{
+			URoomRecipeAsset* Recipe = LoadRecipeForCommand(Args);
+			if (Recipe == nullptr) { return; }
+
+			FString Status;
+			const bool bOk = URoomAuthorTools::GenerateRoom(nullptr, Recipe, Status);
+			UE_LOG(LogTemp, Display, TEXT("Generate: %s"), *Status);
+			if (!bOk) { UE_LOG(LogTemp, Warning, TEXT("Generate refused.")); }
+		}),
+		ECVF_Cheat);
+
+	FAutoConsoleCommand CommandBake(
+		TEXT("ProceduralDungeon.Author.Bake"),
+		TEXT("Bake what is standing in the authoring level into one room piece per exit. "
+		     "Arg: the recipe's object path."),
+		FConsoleCommandWithArgsDelegate::CreateLambda([](const TArray<FString>& Args)
+		{
+			URoomRecipeAsset* Recipe = LoadRecipeForCommand(Args);
+			if (Recipe == nullptr) { return; }
+
+			TArray<FString> Paths;
+			FString Status;
+			const bool bOk = URoomAuthorTools::BakeAuthoredRoom(nullptr, Recipe, Paths, Status);
+			UE_LOG(LogTemp, Display, TEXT("Bake: %s"), *Status);
+			for (const FString& Path : Paths)
+			{
+				UE_LOG(LogTemp, Display, TEXT("  wrote %s"), *Path);
+			}
+			if (!bOk) { UE_LOG(LogTemp, Warning, TEXT("Bake refused. Nothing was written.")); }
+		}),
+		ECVF_Cheat);
+}
+#endif // WITH_EDITOR
+
 // ---------------------------------------------------------------------------- the bake
 //
 // Writes Master_Room_C children, which is what makes this a REWRITE of Level_Creator_1's bake
