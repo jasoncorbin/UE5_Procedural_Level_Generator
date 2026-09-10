@@ -8,17 +8,19 @@
 
 ## Where things stand
 
-Branch `port/room-authoring`, 18 commits. **Steps 1–6 done. Step 7 remains.**
+Branch `port/room-authoring`, 22 commits. **Steps 1–6 done. Step 7 is most of the way
+done** — see **Step 7** below for what is left, which is the kit-set picker and nothing else.
 
 An authored room now bakes straight into v1's `Master_Room` contract and the pieces drop into
 the existing Blueprint generator with no converter. That was the point of the whole port, and
 it is done: a real bake ran from the widget on 2026-09-08 and produced four correct pieces.
 
-**62 automation tests, 62 passing, 0 failing.**
+**67 automation tests, 67 passing, 0 failing** — verified headlessly against a real build,
+not a Live Coding patch.
 
 | Group | n | What it covers |
 |---|---|---|
-| `Tools` | 13 | display names, the interior arch, chamber edit/attach, save/load, kit-set override panel |
+| `Tools` | 18 | display names, the interior arch, chamber edit/attach, save/load, kit-set override panel, the inherit vocabulary |
 | `Openings` | 7 | corner rules, one-opening-per-side, Open/Merged spans |
 | `KitSet` | 6 | census defaults, inherit, override, ceiling-empty, the null-kit fallback |
 | `Attachment` | 5 | centring, normalisation, ascending parents, back sides |
@@ -165,6 +167,27 @@ Each of these was verified against the assets or the code, and each cost time to
 
 ---
 
+
+9. **The Bake button's saved-path pin was NOT stale.** Step 7's problem 1 was void. The
+   `BakeAuthoredRoom` node in `DoBake` already carried the current signature's
+   `OutSavedPaths` array pin, `OutStatus` was wired to the status line, and the widget
+   compiled clean with warnings as errors. Blueprint call nodes reconstruct against the
+   current `UFUNCTION` on load, so the mismatch healed itself. The status string already
+   names the folder and the piece count; only the per-piece paths are absent, which is
+   cosmetic. **Nothing was wrong with the Bake button.**
+
+10. **Live Coding accepts new `UFUNCTION`s.** The previous brief expected a refusal. It
+    patched three new reflected static functions across four compiles without complaint.
+    Its real limit is elsewhere — see the traps.
+
+11. **Epic's toolset has a full Blueprint graph surface**, not just UMG. Step 7's note that
+    `UMGToolSet` "has not been explored" is answered: `UMGToolSet` manipulates the widget
+    TREE only, and every graph edit in this session went through
+    `editor_toolset.toolsets.blueprint.BlueprintTools` instead — `read_graph_dsl`,
+    `write_graph_dsl`, `find_node_types`, `get_node_type_pins`, `add_function_param`,
+    `compile_blueprint`. The old external bridge's tool names survive here because they were
+    always Epic's; the previous brief's guess that they were the bridge's own was wrong.
+
 ## Facts measured this session
 
 **`Master_Room`'s structure**, loaded from the asset:
@@ -216,24 +239,60 @@ room — but **authored rooms will not look like the existing ones.** Unresolved
 
 ---
 
-## Step 7 — the remaining work
+## Step 7 — what is left
 
-Port `EUW_RoomAuthor` and rewire it. It is already migrated to
-`/Game/RectDungeon/Authoring/EUW_RoomAuthor` and it runs; two things are wrong with it.
+`EUW_RoomAuthor` is migrated to `/Game/RectDungeon/Authoring/EUW_RoomAuthor`, it runs, and the
+piece panel now speaks about inheritance correctly. **Only the kit-set picker remains.**
 
-**1. The Bake button's saved-path pin is stale.** `BakeAuthoredRoom` now returns
-`TArray<FString>& OutSavedPaths` rather than a single `FString`, because it writes one piece per
-exit. The status line comes through correctly — the refusal seen on the first attempt was this
-project's own message — but anything the widget says about *where* it wrote is not trustworthy.
-Read the Output Log's `wrote ...` lines instead until this is fixed.
+### Done on 2026-09-09
 
-**2. The piece panel cannot express "inherit".** A chamber's piece slots are now OVERRIDES, and
-empty means inherit from the kit set. `GetChamberPieces` deliberately returns the raw slot, so an
-un-overridden chamber reads back empty — that is correct and is tested
-(`Tools.ThePiecePanelShowsOverridesNotInheritedValues`). The widget needs to *show* that
-distinction, and needs a `KitSet` field on the room panel. **Do not make the getter resolve:** a
-Get/Set round trip would then freeze every inherited value into an explicit override and the room
-would stop following its kit, which is the exact duplication kit sets remove.
+**The panel was freezing every inherited slot into an override, on every repaint.** This was
+worse than the previous brief's "the piece panel cannot express inherit", and it was live:
+
+```
+RepaintPanel   ends with PushChamber
+RefreshCombos  filled each piece combo and selected index 0 -- a real piece
+PullChamber    called SelectOption(combo, "") for an inherited slot
+SelectOption   could not find "", did NOTHING, left index 0 selected
+PushChamber    wrote that index-0 piece back as an explicit override
+```
+
+So opening the tool or loading a room stopped that room following its kit. Fixed in `26cc193`
+by making index 0 not a real piece: `FillCombo` seeds each combo with
+`GetInheritedPieceLabel` and takes a `Slot` argument, and `SelectOption` treats an empty
+option as "select index 0" instead of as nothing to do. `PathForDisplayName` does not
+recognise the bracketed label, so pushing it back returns the empty path that means inherit --
+which is asserted by `Tools.TheInheritEntryReadsBackAsInherit`, not assumed.
+
+Three C++ entry points were added for this (`6d6c467`, `91809ff`):
+
+| Function | What it is for |
+|---|---|
+| `GetInheritedPieceDisplayName(Recipe, Slot)` | what a slot WOULD resolve to. Reads the kit only — never a chamber, so it cannot hand the panel a value to freeze |
+| `GetInheritedPieceLabel(Recipe, Slot)` | the combo entry that means inherit: `(inherit - Wall_01_E_straight_large)` or `(inherit - none)` |
+| `SetRoomKitSet(Recipe, KitSet)` | the only door onto `URoomRecipeAsset::KitSet`, which is `BlueprintReadOnly`. Null is legal — it returns the room to the built-in census |
+
+Slot names mirror `GetChamberPieces`' outputs: `Wall`, `CornerNW`, `CornerNE`, `CornerSE`,
+`CornerSW`, `Floor`, `CeilingMesh`. All four corners answer with the kit's single `Corner`.
+
+**Not verified by clicking.** The graphs were read back and the widget compiles clean with
+warnings as errors, and every C++ link in the chain is tested — but nobody has opened the tool
+and looked at the combos since the change. Worth one pass before building on it.
+
+### Remaining: the kit-set picker
+
+The room panel still has no `KitSet` field, so `SetRoomKitSet` has no caller. The panel rows
+are named `Row<Thing>` with `Lbl_<Thing>` + `<Thing>Combo` inside; add `RowKitSet` beside
+`RowType` and follow `RefreshLoadCombo`'s shape — one scan producing labels, a second call
+resolving a label back to the asset, in the same order.
+
+That needs two more C++ functions, mirroring `GetLibraryRecipeLabels` / `LoadRecipeFromLibrary`:
+a label scan over `UDungeonKitSet` assets and a lookup from label to asset. The list must carry
+an entry for "no kit set" — that is a real, reachable state, not an empty selection.
+
+**It must call `RepaintPanel` when the kit changes.** The inherit labels are baked into the
+combos at `RefreshCombos` time, so changing the kit without a repaint leaves every
+`(inherit - ...)` label naming the old kit's pieces.
 
 ---
 
@@ -252,17 +311,55 @@ would stop following its kit, which is the exact duplication kit sets remove.
   its own commit, is still the right shape.
 - **The `.uproject` is LFS-tracked** (`*.uproject filter=lfs` in `.gitattributes`). A clone
   without LFS installed gets a pointer file and cannot open the project.
-- **Decide whether baked rooms belong in git.** They are DERIVED data — the bake regenerates
-  them wholesale — and each is ~1.1 MB of LFS. Four accidentally landed in `f331996` and were
-  untracked again in the commit after it; the room library is otherwise unversioned. Tonight's
-  throwaways (`Room_New`, `Room_New2` and their pieces) are on disk and ignored by git. Either
-  version the library deliberately or add `Content/RectDungeon/Rooms/` to `.gitignore` — the
-  current state is "neither", which is the one state that will surprise someone.
+- ~~Decide whether baked rooms belong in git.~~ **Decided 2026-09-09: ignored.** The rule
+  now covers `Rooms/**/BP_Room_*` and `Rooms/**/DA_Room_*` — every room type and both
+  derived prefixes, where it previously named only `Generic/BP_Room_*`. It deliberately
+  does NOT ignore the whole folder: `DA_RoomRecipe_*` sits in the same directory by design
+  and is authored SOURCE, so a blanket rule would have quietly stopped tracking the rooms
+  themselves. `DA_Room_*` does not match `DA_RoomRecipe_*`.
 - `magic` MCP server fails to connect (API key reset). Unrelated to this work.
 
 ---
 
 ## Traps
+
+- **THE MYSTERY CONTENT COMMITS ARE EXPLAINED.** An MCP call that touches an asset marks it
+  dirty, and the editor writes it out on close or autosave — so a `.uasset` appears modified in
+  `git status` some time after the call, with nothing in the session obviously touching content.
+  A single `compile_blueprint` on `EUW_RoomAuthor` did it this session, and the change was a
+  pure re-serialise with no semantic content. That is the same class of cause as the two
+  accidental baked-room commits: content written *while* a commit was being prepared, by the
+  editor rather than by the `git add`. **Still check `git status` before every commit** — but
+  the mechanism is no longer unknown, and the answer is usually `git checkout --` on an asset
+  you did not mean to change.
+
+- **Live Coding registers new automation tests only on a module's FIRST patch per editor
+  session.** Four new tests added on the first patch appeared and ran. A fifth added on a later
+  patch never appeared: the compile reported `Result: Success`, `ListTests` did not list it, and
+  `RunTests` returned `total: 0` rather than an error. Touching the file and recompiling did not
+  help. **A test that will not appear is not a passing test** — close the editor and build. The
+  same is not true of function bodies or new `UFUNCTION`s, which patch fine.
+
+- **The graph DSL does not round-trip.** `read_graph_dsl` emits forms `write_graph_dsl` refuses:
+  - Member-function calls print their arguments without `self`, but the writer binds the first
+    positional argument TO `self`. Use keyword form — `(CallFunction|ComboClear :Combo Combo)`,
+    not `(CallFunction|ComboClear Combo)`. The reader is not even consistent about this: it
+    printed `self` explicitly in `FillAttachCombo` and omitted it in `FillCombo`.
+  - Type ids can be ambiguous. The widget's own `SelectOption` reads back as
+    `SwitchActor|SelectOption`, which is an unrelated ENGINE function on `ASwitchActor` with
+    completely different pins. Writing what you read would have silently built the wrong node.
+    `find_node_types` returned both; `CallFunction|SelectOption` is the widget's.
+  - `(== a b)` picks an overload by guess and fails on strings. Use the explicit node —
+    `Utilities|String|IsEmpty`, `Utilities|String|EqualExactly(String)`.
+
+  **So: read, then verify every node type with `find_node_types` and `get_node_type_pins`
+  before writing, and read back afterwards.** A failed `write_graph_dsl` leaves the graph
+  untouched, which is the one merciful part — both failures this session were recoverable.
+
+- **Changing a Blueprint function's signature breaks its call sites until they are rewritten.**
+  `add_function_param` on `FillCombo` made the body writable but left seven stale call nodes in
+  `RefreshCombos`, and the next `write_graph_dsl` failed with "Could not find a pin for the
+  parameter Slot". Rewrite the callers in the same sitting.
 
 - **Check `git status` before every commit on this branch.** Two commits picked up baked
   Blueprints nobody staged on purpose — `f331996` (meant to add one test file) and `b59b9ef`
