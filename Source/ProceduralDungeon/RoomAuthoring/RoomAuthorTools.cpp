@@ -445,6 +445,39 @@ FString URoomAuthorTools::DisplayNameForPath(const FString& ObjectPath)
 	return Name;
 }
 
+// -------------------------------------------------------------------------------- kit sets
+
+FString URoomAuthorTools::GetInheritedPieceDisplayName(const URoomRecipeAsset* Recipe,
+                                                       const FString& Slot)
+{
+	if (Recipe == nullptr) { return FString(); }
+
+	// EffectiveKit, not KitSet: a room with no set still inherits, from the class default that
+	// carries the census. The panel has to show what the generator will actually use.
+	const UDungeonKitSet& Kit = Recipe->EffectiveKit();
+
+	if (Slot == TEXT("Wall"))        { return DisplayNameForPath(Kit.Wall.ToString()); }
+	if (Slot == TEXT("Floor"))       { return DisplayNameForPath(Kit.Floor.ToString()); }
+	if (Slot == TEXT("CeilingMesh")) { return DisplayNameForPath(Kit.CeilingMesh.ToString()); }
+
+	// One asset backs all four corners -- the emitter rotates it -- so they answer alike.
+	if (Slot == TEXT("CornerNW") || Slot == TEXT("CornerNE")
+		|| Slot == TEXT("CornerSE") || Slot == TEXT("CornerSW"))
+	{
+		return DisplayNameForPath(Kit.Corner.ToString());
+	}
+
+	return FString();
+}
+
+void URoomAuthorTools::SetRoomKitSet(URoomRecipeAsset* Recipe, UDungeonKitSet* KitSet)
+{
+	if (Recipe == nullptr) { return; }
+
+	Recipe->KitSet = KitSet;
+	Recipe->MarkPackageDirty();
+}
+
 // ---------------------------------------------------------------------------- recipe state
 
 URoomRecipeAsset* URoomAuthorTools::NewWorkingRecipe()

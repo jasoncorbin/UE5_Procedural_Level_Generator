@@ -696,4 +696,159 @@ bool FRoomAuthorPiecePanelShowsOverridesNotResolvedValues::RunTest(const FString
 	return true;
 }
 
+// --- The panel's "inherit" vocabulary -------------------------------------------------------
+
+/**
+ * What the panel shows beside an EMPTY slot must come from the kit, never from the chamber.
+ *
+ * ThePiecePanelShowsOverridesNotInheritedValues pins the getter's silence; this pins the other
+ * half of the same contract. The panel has to render "(inherit - Wall_01_E_straight_large)"
+ * somewhere, and the only safe source for that string is the kit itself: read the chamber to
+ * build it and a Get/Set round trip starts writing inherited values back as overrides, which
+ * is precisely the freeze kit sets exist to prevent.
+ *
+ * So this asserts the hostile case directly -- an override IS set, and the inherited name still
+ * reports the kit's piece rather than the override's.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRoomAuthorInheritedNameComesFromTheKit,
+	"ProceduralDungeon.RoomAuthoring.Tools.TheInheritedNameComesFromTheKitNotTheOverride",
+	RoomAuthorToolsTestFlags)
+
+bool FRoomAuthorInheritedNameComesFromTheKit::RunTest(const FString&)
+{
+	URoomRecipeAsset* Recipe = NewObject<URoomRecipeAsset>();
+	Recipe->KitSet = NewObject<UDungeonKitSet>();
+	Recipe->Chambers.Add(FRoomChamber());
+
+	// Deliberately hostile: every slot the panel can show is overridden with something that is
+	// NOT the kit's piece, so a lookup that reads the chamber cannot accidentally pass.
+	Recipe->Chambers[0].WallCls = FSoftClassPath(
+		TEXT("/Game/Nowhere/BP_COMP_Wall_Overridden.BP_COMP_Wall_Overridden_C"));
+	Recipe->Chambers[0].FloorCls = FSoftClassPath(
+		TEXT("/Game/Nowhere/BP_COMP_Floor_Overridden.BP_COMP_Floor_Overridden_C"));
+	Recipe->Chambers[0].CornerNWCls = FSoftClassPath(
+		TEXT("/Game/Nowhere/BP_COMP_Corner_Overridden.BP_COMP_Corner_Overridden_C"));
+
+	TestEqual(TEXT("the inherited wall is the kit's wall, not the override"),
+		URoomAuthorTools::GetInheritedPieceDisplayName(Recipe, TEXT("Wall")),
+		URoomAuthorTools::DisplayNameForPath(Recipe->KitSet->Wall.ToString()));
+
+	TestEqual(TEXT("the inherited floor is the kit's floor, not the override"),
+		URoomAuthorTools::GetInheritedPieceDisplayName(Recipe, TEXT("Floor")),
+		URoomAuthorTools::DisplayNameForPath(Recipe->KitSet->Floor.ToString()));
+
+	// One kit asset backs all four corners -- the emitter rotates it -- so every corner slot
+	// inherits the same name. Asserting all four keeps that from being quietly split later.
+	const FString KitCorner =
+		URoomAuthorTools::DisplayNameForPath(Recipe->KitSet->Corner.ToString());
+	TestEqual(TEXT("NW inherits the kit's corner"),
+		URoomAuthorTools::GetInheritedPieceDisplayName(Recipe, TEXT("CornerNW")), KitCorner);
+	TestEqual(TEXT("NE inherits the kit's corner"),
+		URoomAuthorTools::GetInheritedPieceDisplayName(Recipe, TEXT("CornerNE")), KitCorner);
+	TestEqual(TEXT("SE inherits the kit's corner"),
+		URoomAuthorTools::GetInheritedPieceDisplayName(Recipe, TEXT("CornerSE")), KitCorner);
+	TestEqual(TEXT("SW inherits the kit's corner"),
+		URoomAuthorTools::GetInheritedPieceDisplayName(Recipe, TEXT("CornerSW")), KitCorner);
+
+	// The chamber is untouched by the question. Asking must never be a write.
+	TestEqual(TEXT("asking for the inherited name leaves the override alone"),
+		Recipe->Chambers[0].WallCls.ToString(),
+		FString(TEXT("/Game/Nowhere/BP_COMP_Wall_Overridden.BP_COMP_Wall_Overridden_C")));
+
+	return true;
+}
+
+/**
+ * A slot the kit leaves empty must report empty, not a plausible-looking guess.
+ *
+ * CeilingMesh is the live case: UDungeonKitSet ships it empty on purpose, because the census
+ * found no shipping room that named one. The panel therefore has to render "(inherit - none)"
+ * rather than a piece name, and an unknown slot name has to be as harmless as it is silent.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRoomAuthorInheritedNameIsEmptyWhenTheKitIs,
+	"ProceduralDungeon.RoomAuthoring.Tools.AnEmptyKitSlotInheritsAnEmptyName",
+	RoomAuthorToolsTestFlags)
+
+bool FRoomAuthorInheritedNameIsEmptyWhenTheKitIs::RunTest(const FString&)
+{
+	URoomRecipeAsset* Recipe = NewObject<URoomRecipeAsset>();
+	Recipe->KitSet = NewObject<UDungeonKitSet>();
+
+	TestTrue(TEXT("the kit really does ship without a ceiling"),
+		Recipe->KitSet->CeilingMesh.ToString().IsEmpty());
+	TestTrue(TEXT("so the ceiling inherits an empty name"),
+		URoomAuthorTools::GetInheritedPieceDisplayName(Recipe, TEXT("CeilingMesh")).IsEmpty());
+
+	TestTrue(TEXT("an unknown slot name inherits nothing rather than guessing"),
+		URoomAuthorTools::GetInheritedPieceDisplayName(Recipe, TEXT("Doorframe")).IsEmpty());
+	TestTrue(TEXT("a null recipe inherits nothing rather than crashing"),
+		URoomAuthorTools::GetInheritedPieceDisplayName(nullptr, TEXT("Wall")).IsEmpty());
+
+	return true;
+}
+
+/**
+ * A recipe with NO kit set still inherits, from the class default.
+ *
+ * URoomRecipeAsset::EffectiveKit falls back to GetDefault<UDungeonKitSet>(), which carries the
+ * six-asset census in its constructor -- that fallback is what makes a DA_KitSet_* asset a
+ * convenience rather than a requirement. The panel must show the same thing the generator will
+ * actually use, so the inherited name has to follow that fallback rather than going blank.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRoomAuthorInheritedNameFollowsTheNullKitFallback,
+	"ProceduralDungeon.RoomAuthoring.Tools.ARoomWithNoKitInheritsTheBuiltInCensus",
+	RoomAuthorToolsTestFlags)
+
+bool FRoomAuthorInheritedNameFollowsTheNullKitFallback::RunTest(const FString&)
+{
+	URoomRecipeAsset* Recipe = NewObject<URoomRecipeAsset>();
+	Recipe->KitSet = nullptr;
+
+	TestEqual(TEXT("a kit-less room inherits the built-in census wall"),
+		URoomAuthorTools::GetInheritedPieceDisplayName(Recipe, TEXT("Wall")),
+		URoomAuthorTools::DisplayNameForPath(GetDefault<UDungeonKitSet>()->Wall.ToString()));
+
+	TestFalse(TEXT("and that name is not empty, so the panel has something to show"),
+		URoomAuthorTools::GetInheritedPieceDisplayName(Recipe, TEXT("Wall")).IsEmpty());
+
+	return true;
+}
+
+/**
+ * The room panel needs to CHANGE the kit, and URoomRecipeAsset::KitSet is BlueprintReadOnly.
+ *
+ * Read-only on purpose -- it is the room's identity, not a scratch field -- so the one way a
+ * widget may move it goes through here, and the proof that it worked is that the chambers'
+ * inherited values follow. Setting the pointer without the inheritance moving with it would be
+ * a field that looks connected and is not.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRoomAuthorSettingTheKitMovesWhatChambersInherit,
+	"ProceduralDungeon.RoomAuthoring.Tools.SettingTheKitMovesWhatChambersInherit",
+	RoomAuthorToolsTestFlags)
+
+bool FRoomAuthorSettingTheKitMovesWhatChambersInherit::RunTest(const FString&)
+{
+	URoomRecipeAsset* Recipe = NewObject<URoomRecipeAsset>();
+	Recipe->Chambers.Add(FRoomChamber());
+
+	UDungeonKitSet* Other = NewObject<UDungeonKitSet>();
+	Other->Wall = FSoftClassPath(TEXT("/Game/Other/BP_COMP_Wall_Other.BP_COMP_Wall_Other_C"));
+
+	URoomAuthorTools::SetRoomKitSet(Recipe, Other);
+
+	TestEqual(TEXT("the room now points at the kit it was given"),
+		ToRawPtr(Recipe->KitSet), Other);
+	TestEqual(TEXT("and an un-overridden chamber resolves through it"),
+		Recipe->ResolveWall(Recipe->Chambers[0]).ToString(), Other->Wall.ToString());
+	TestEqual(TEXT("and the panel reports it as the inherited name"),
+		URoomAuthorTools::GetInheritedPieceDisplayName(Recipe, TEXT("Wall")),
+		URoomAuthorTools::DisplayNameForPath(Other->Wall.ToString()));
+
+	// Clearing it is a legal move back to the built-in census, not a refusal.
+	URoomAuthorTools::SetRoomKitSet(Recipe, nullptr);
+	TestNull(TEXT("clearing the kit is allowed"), ToRawPtr(Recipe->KitSet));
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

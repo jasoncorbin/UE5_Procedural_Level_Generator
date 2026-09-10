@@ -139,6 +139,44 @@ public:
 	 */
 	static FString DisplayNameForPath(const FString& ObjectPath);
 
+	// ----------------------------------------------------------------------------- kit sets
+
+	/**
+	 * What SLOT would resolve to if the chamber left it empty, as a display name for the panel.
+	 *
+	 * READS THE KIT ONLY. It never looks at a chamber, which is not an optimisation but the
+	 * whole point: the piece panel has to render the inherited value beside an empty combo, and
+	 * a helper that got there by resolving a chamber would hand the panel a string it could
+	 * then write back as an explicit override. That freeze is what kit sets exist to prevent,
+	 * and it is pinned from the other side by
+	 * Tools.ThePiecePanelShowsOverridesNotInheritedValues.
+	 *
+	 * Slot names mirror GetChamberPieces' outputs exactly -- Wall, CornerNW, CornerNE, CornerSE,
+	 * CornerSW, Floor, CeilingMesh -- so the panel names a slot once. All four corners answer
+	 * with the kit's single Corner, because one asset backs all four and the emitter rotates it.
+	 *
+	 * Empty means "the kit leaves this slot empty" (CeilingMesh ships that way) or "no such
+	 * slot". Both are things the panel shows as inheriting nothing, so they need not differ.
+	 * A null recipe answers empty rather than refusing -- the panel asks before a room exists.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Room Authoring|Pieces")
+	static FString GetInheritedPieceDisplayName(const URoomRecipeAsset* Recipe,
+	                                            const FString& Slot);
+
+	/**
+	 * Point the room at a kit set, or at nothing.
+	 *
+	 * URoomRecipeAsset::KitSet is BlueprintReadOnly, so this is the only door a widget has --
+	 * the same reason every other grouped setter in this library exists. Null is a legal
+	 * argument and not a refusal: it returns the room to the built-in census that
+	 * URoomRecipeAsset::EffectiveKit falls back to, which is a room's starting state and has to
+	 * stay reachable once it has been left.
+	 *
+	 * Does nothing on a null recipe.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Room Authoring|Recipe")
+	static void SetRoomKitSet(URoomRecipeAsset* Recipe, UDungeonKitSet* KitSet);
+
 	// ------------------------------------------------------------------------- recipe state
 
 	/**
