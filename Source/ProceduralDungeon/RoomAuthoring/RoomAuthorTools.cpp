@@ -558,7 +558,86 @@ namespace
 	/** DA_RoomRecipe_<RoomName> -- the prefix Save writes and the listing strips back off. */
 	const TCHAR* RecipeAssetPrefix = TEXT("DA_RoomRecipe_");
 
+	/**
+	 * The picker's first entry, meaning "no kit set asset".
+	 *
+	 * Bracketed for the same reason GetInheritedPieceLabel is: an asset name cannot contain a
+	 * bracket, so this cannot collide with a real kit set however the library grows.
+	 */
+	const TCHAR* BuiltInKitLabel = TEXT("(built-in census)");
+
+	/** DA_KitSet_<Name> -- the prefix the picker strips back off. */
+	const TCHAR* KitSetAssetPrefix = TEXT("DA_KitSet_");
+
+	/**
+	 * <folder under /Game>/<name minus prefix>. The ONE rule that turns a kit set into a label.
+	 *
+	 * Both the scan and LabelForRoomKitSet go through here, and that is the point: the panel
+	 * resolves a label to an asset when the author picks one, and turns an asset back into a
+	 * label when it repaints. Two derivations of one string cannot drift apart; a scan on one
+	 * side and a search on the other can, and the failure is silent -- the combo would show the
+	 * built-in entry for a room that has a kit, and the next push would clear it.
+	 *
+	 * Keeps the folder rather than the bare name so two kit sets of the same name in different
+	 * folders stay distinguishable.
+	 */
+	FString KitLabelForPath(const FString& PackagePath, const FString& AssetName)
+	{
+		FString Folder = PackagePath;
+		if (!Folder.RemoveFromStart(TEXT("/Game/"))) { Folder.RemoveFromStart(TEXT("/Game")); }
+
+		FString Name = AssetName;
+		Name.RemoveFromStart(KitSetAssetPrefix);
+
+		return Folder.IsEmpty() ? Name : FString::Printf(TEXT("%s/%s"), *Folder, *Name);
+	}
+
 #if WITH_EDITOR
+	/**
+	 * One scan of every kit set in the project, labels and object paths in a single order.
+	 *
+	 * ALL of /Game, not a library root. A room may point at a kit set filed anywhere, and a
+	 * picker that could not list that kit would show the built-in entry beside it -- after
+	 * which the next push would clear the room's kit outright. Scanning everything makes that
+	 * unreachable rather than merely unlikely.
+	 *
+	 * The built-in entry always leads, so index 0 is a meaningful default and its path is empty
+	 * by construction -- that empty path is what KitSetForLabel reads as "no asset".
+	 */
+	void CollectKitSets(TArray<FString>& OutLabels, TArray<FString>& OutPaths)
+	{
+		OutLabels.Reset();
+		OutPaths.Reset();
+
+		OutLabels.Add(BuiltInKitLabel);
+		OutPaths.Add(FString());
+
+		FAssetRegistryModule& Module =
+			FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+
+		FARFilter Filter;
+		Filter.ClassPaths.Add(UDungeonKitSet::StaticClass()->GetClassPathName());
+		Filter.PackagePaths.Add(FName(TEXT("/Game")));
+		Filter.bRecursivePaths = true;
+
+		TArray<FAssetData> Found;
+		Module.Get().GetAssets(Filter, Found);
+
+		// Sorted for the same reason the recipe listing is: the registry's own order is
+		// discovery order, and a combo whose rows move between sessions gets misclicked.
+		Found.Sort([](const FAssetData& A, const FAssetData& B)
+		{
+			return A.PackageName.LexicalLess(B.PackageName);
+		});
+
+		for (const FAssetData& Data : Found)
+		{
+			OutLabels.Add(KitLabelForPath(Data.PackagePath.ToString(),
+			                              Data.AssetName.ToString()));
+			OutPaths.Add(Data.GetSoftObjectPath().ToString());
+		}
+	}
+
 	/**
 	 * One scan of the library, producing the labels and the object paths they resolve to in a
 	 * single pass and a single order.
@@ -708,6 +787,54 @@ bool URoomAuthorTools::SaveRecipeToLibrary(const URoomRecipeAsset* Recipe, FStri
 	OutStatus = TEXT("REFUSED - room authoring is an editor-only tool.");
 	return false;
 #endif
+}
+
+TArray<FString> URoomAuthorTools::GetKitSetLabels()
+{
+#if WITH_EDITOR
+	TArray<FString> Labels;
+	TArray<FString> Paths;
+	CollectKitSets(Labels, Paths);
+	return Labels;
+#else
+	return TArray<FString>();
+#endif
+}
+
+UDungeonKitSet* URoomAuthorTools::KitSetForLabel(const FString& Label)
+{
+#if WITH_EDITOR
+	TArray<FString> Labels;
+	TArray<FString> Paths;
+	CollectKitSets(Labels, Paths);
+
+	// An unknown label and the built-in entry answer alike, and deliberately so: the built-in
+	// entry MEANS no asset, and a label that has gone stale names a kit set the author can no
+	// longer have meant. Neither is an error worth a separate channel.
+	const int32 Index = Labels.IndexOfByKey(Label);
+	if (Index == INDEX_NONE || Paths[Index].IsEmpty()) { return nullptr; }
+
+	return LoadObject<UDungeonKitSet>(nullptr, *Paths[Index]);
+#else
+	return nullptr;
+#endif
+}
+
+FString URoomAuthorTools::LabelForRoomKitSet(const URoomRecipeAsset* Recipe)
+{
+	if (Recipe == nullptr || Recipe->KitSet == nullptr) { return BuiltInKitLabel; }
+
+	// DERIVED from the kit's own package, through the same rule the scan uses -- not searched
+	// for in the list. A search can miss, and a miss here reports "no kit" for a room that has
+	// one, which the next push turns into actually having none.
+	const UDungeonKitSet* Kit = Recipe->KitSet;
+	const FString PackageName = Kit->GetPackage()->GetName();
+
+	FString Folder = PackageName;
+	int32 Slash = INDEX_NONE;
+	if (Folder.FindLastChar(TEXT('/'), Slash)) { Folder = Folder.Left(Slash); }
+
+	return KitLabelForPath(Folder, Kit->GetName());
 }
 
 TArray<FString> URoomAuthorTools::GetLibraryRecipeLabels()

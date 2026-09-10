@@ -898,4 +898,121 @@ bool FRoomAuthorInheritLabelIsNotAPieceName::RunTest(const FString&)
 	return true;
 }
 
+// --- The kit-set picker ---------------------------------------------------------------------
+
+/**
+ * "No kit set" is a real, reachable state and the picker must be able to say it.
+ *
+ * A room with no set resolves through the class default, which carries the census -- that is
+ * where every room starts and it has to stay selectable once it has been left. So the list is
+ * never empty, and its first entry means "the built-in census".
+ *
+ * The entry is asserted by its SHAPE rather than its wording: it is bracketed, and an asset
+ * name cannot contain a bracket, so it cannot collide with a real kit set however the library
+ * grows. That is the same guarantee GetInheritedPieceLabel relies on, and pinning the property
+ * rather than the string keeps this test from breaking when the wording is tuned.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRoomAuthorKitPickerAlwaysOffersTheBuiltIn,
+	"ProceduralDungeon.RoomAuthoring.Tools.TheKitPickerAlwaysOffersTheBuiltInCensus",
+	RoomAuthorToolsTestFlags)
+
+bool FRoomAuthorKitPickerAlwaysOffersTheBuiltIn::RunTest(const FString&)
+{
+	const TArray<FString> Labels = URoomAuthorTools::GetKitSetLabels();
+
+	if (!TestTrue(TEXT("the picker always offers at least one entry"), Labels.Num() >= 1))
+	{
+		return false;
+	}
+
+	const FString BuiltIn = Labels[0];
+	TestTrue(TEXT("the built-in entry is bracketed, so no asset name can collide with it"),
+		BuiltIn.StartsWith(TEXT("(")) && BuiltIn.EndsWith(TEXT(")")));
+	TestNull(TEXT("and it resolves to no kit set at all"),
+		URoomAuthorTools::KitSetForLabel(BuiltIn));
+
+	// A label nobody offers must not resolve to something arbitrary.
+	TestNull(TEXT("an unknown label resolves to nothing"),
+		URoomAuthorTools::KitSetForLabel(TEXT("DA_KitSet_NoSuchThing")));
+
+	URoomRecipeAsset* Recipe = NewObject<URoomRecipeAsset>();
+	Recipe->KitSet = nullptr;
+
+	TestEqual(TEXT("a room with no kit reports the built-in entry"),
+		URoomAuthorTools::LabelForRoomKitSet(Recipe), BuiltIn);
+	TestEqual(TEXT("and so does no room at all"),
+		URoomAuthorTools::LabelForRoomKitSet(nullptr), BuiltIn);
+
+	// The panel selects by label, so what a room reports has to be something the list offers.
+	// If it were not, SelectOption would fall back to index 0 and the next push would clear the
+	// room's kit -- the same freeze the piece combos had.
+	TestTrue(TEXT("what a room reports is an entry the picker offers"),
+		Labels.Contains(URoomAuthorTools::LabelForRoomKitSet(Recipe)));
+
+	return true;
+}
+
+/**
+ * Every kit set the picker lists must open, and must report the label it was listed under.
+ *
+ * The round trip is the point. The panel resolves a label to an asset when the author picks
+ * one, and turns an asset back into a label when it repaints; if those two disagree the combo
+ * shows the wrong kit, or -- worse -- shows the built-in entry for a room that has a kit, and
+ * the next push clears it.
+ *
+ * Shaped like EveryListedRecipeOpens: the count is logged rather than asserted, because an
+ * empty kit library is a legitimate state and a test that silently checks nothing should still
+ * say so out loud.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRoomAuthorEveryListedKitSetResolves,
+	"ProceduralDungeon.RoomAuthoring.Tools.EveryListedKitSetResolvesAndRoundTrips",
+	RoomAuthorToolsTestFlags)
+
+bool FRoomAuthorEveryListedKitSetResolves::RunTest(const FString&)
+{
+	const TArray<FString> Labels = URoomAuthorTools::GetKitSetLabels();
+
+	AddInfo(FString::Printf(TEXT("the picker listed %d entr(y/ies): %s"),
+		Labels.Num(), *FString::Join(Labels, TEXT(", "))));
+
+	URoomRecipeAsset* Recipe = NewObject<URoomRecipeAsset>();
+
+	// Index 0 is the built-in entry and is covered by the test above; everything after it names
+	// an asset.
+	for (int32 Index = 1; Index < Labels.Num(); ++Index)
+	{
+		const FString& Label = Labels[Index];
+
+		UDungeonKitSet* Kit = URoomAuthorTools::KitSetForLabel(Label);
+		if (!TestNotNull(*FString::Printf(TEXT("a listed kit set opens: %s"), *Label), Kit))
+		{
+			continue;
+		}
+
+		URoomAuthorTools::SetRoomKitSet(Recipe, Kit);
+		TestEqual(*FString::Printf(TEXT("%s reports the label it was listed under"), *Label),
+			URoomAuthorTools::LabelForRoomKitSet(Recipe), Label);
+	}
+
+	// The loop above is vacuous until the project has a kit set asset, so this pins the
+	// property that has to hold whether the library is empty or not: a room that HAS a kit must
+	// never be reported as having none. If it were, the picker would show the built-in entry
+	// and the next push would clear the room's kit -- the freeze the piece combos just had,
+	// wearing a different hat. A transient kit is the sharpest case, because it is the one the
+	// scan definitely cannot find.
+	UDungeonKitSet* Unlisted = NewObject<UDungeonKitSet>();
+	URoomAuthorTools::SetRoomKitSet(Recipe, Unlisted);
+
+	const FString UnlistedLabel = URoomAuthorTools::LabelForRoomKitSet(Recipe);
+	TestFalse(TEXT("a room with a kit never reports an empty label"), UnlistedLabel.IsEmpty());
+
+	if (Labels.Num() > 0)
+	{
+		TestNotEqual(TEXT("and never reports the built-in entry, which would mean no kit"),
+			UnlistedLabel, Labels[0]);
+	}
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

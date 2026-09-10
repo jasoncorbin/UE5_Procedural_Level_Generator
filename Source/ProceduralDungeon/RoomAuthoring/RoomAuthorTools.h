@@ -190,6 +190,43 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Room Authoring|Recipe")
 	static void SetRoomKitSet(URoomRecipeAsset* Recipe, UDungeonKitSet* KitSet);
 
+	/**
+	 * Every kit set the project offers, the built-in census FIRST and then one entry per asset.
+	 *
+	 * The first entry is bracketed -- an asset name cannot contain a bracket -- so it can never
+	 * collide with a real kit set, the same guarantee GetInheritedPieceLabel leans on. It means
+	 * "no kit set asset", which is not an absence but where every room starts: EffectiveKit
+	 * falls back to the class default, which carries the census.
+	 *
+	 * Scans ALL of /Game rather than one library root, and labels each asset by the folder it
+	 * sits in. A room may point at a kit set filed anywhere, and a picker that could not list
+	 * such a kit would show the built-in entry instead -- after which the next push would clear
+	 * the room's kit outright. Path-derived, so listing never loads anything.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Room Authoring|Recipe")
+	static TArray<FString> GetKitSetLabels();
+
+	/**
+	 * The kit set a label names, or null for the built-in entry and for a label nobody offers.
+	 *
+	 * Null is the honest answer for both: the built-in entry MEANS no asset, and a label that
+	 * has gone stale is a kit set the author can no longer have meant. Pairs with
+	 * GetKitSetLabels the way LoadRecipeFromLibrary pairs with GetLibraryRecipeLabels -- one
+	 * scan, one order.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Room Authoring|Recipe")
+	static UDungeonKitSet* KitSetForLabel(const FString& Label);
+
+	/**
+	 * The label a room's current kit is listed under, for the panel to select.
+	 *
+	 * The inverse of KitSetForLabel, and it must agree with it: the panel resolves a label when
+	 * the author picks one and turns the asset back into a label when it repaints. A room with
+	 * no kit -- or no room at all -- reports the built-in entry.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Room Authoring|Recipe")
+	static FString LabelForRoomKitSet(const URoomRecipeAsset* Recipe);
+
 	// ------------------------------------------------------------------------- recipe state
 
 	/**
