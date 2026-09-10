@@ -851,4 +851,51 @@ bool FRoomAuthorSettingTheKitMovesWhatChambersInherit::RunTest(const FString&)
 	return true;
 }
 
+/**
+ * The combo entry that MEANS inherit, and what it must not collide with.
+ *
+ * The piece panel fills each combo from GetPieceDisplayNames and reads it back through
+ * PathForDisplayName, so "inherit" has to be expressible in that same vocabulary: an entry the
+ * author can select, which reads back as the empty path that means inherit. The label is built
+ * in C++ rather than concatenated in the widget graph precisely so this collision can be
+ * asserted -- a label that happened to match a real display name would silently write that
+ * piece as an override, which is the failure the entry exists to prevent.
+ */
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FRoomAuthorInheritLabelIsNotAPieceName,
+	"ProceduralDungeon.RoomAuthoring.Tools.TheInheritEntryReadsBackAsInherit",
+	RoomAuthorToolsTestFlags)
+
+bool FRoomAuthorInheritLabelIsNotAPieceName::RunTest(const FString&)
+{
+	URoomRecipeAsset* Recipe = NewObject<URoomRecipeAsset>();
+	Recipe->KitSet = NewObject<UDungeonKitSet>();
+
+	const FString WallLabel = URoomAuthorTools::GetInheritedPieceLabel(Recipe, TEXT("Wall"));
+
+	// It has to SAY what is inherited, or the author cannot tell one inherited slot from another.
+	TestTrue(TEXT("the label carries the inherited piece name"),
+		WallLabel.Contains(
+			URoomAuthorTools::DisplayNameForPath(Recipe->KitSet->Wall.ToString())));
+
+	// ...and it must round-trip to empty, which is what actually clears the override. An entry
+	// that resolved to a real path would freeze the slot the moment the panel pushed it back.
+	TestTrue(TEXT("selecting the inherit entry reads back as an empty path"),
+		URoomAuthorTools::PathForDisplayName(TEXT("Wall"), false, WallLabel).IsEmpty());
+
+	// A kit slot that ships empty still needs an entry to select -- otherwise a ceiling cannot
+	// be returned to inheriting once it has been overridden.
+	const FString CeilingLabel =
+		URoomAuthorTools::GetInheritedPieceLabel(Recipe, TEXT("CeilingMesh"));
+	TestFalse(TEXT("an empty kit slot still offers an inherit entry"), CeilingLabel.IsEmpty());
+	TestTrue(TEXT("and that entry also reads back as an empty path"),
+		URoomAuthorTools::PathForDisplayName(TEXT("Ceiling(StaticMesh)"), true,
+		                                     CeilingLabel).IsEmpty());
+
+	// The two must be distinguishable, or "inherits nothing" and "inherits a wall" look alike.
+	TestNotEqual(TEXT("inheriting nothing does not read like inheriting a piece"),
+		CeilingLabel, WallLabel);
+
+	return true;
+}
+
 #endif // WITH_DEV_AUTOMATION_TESTS

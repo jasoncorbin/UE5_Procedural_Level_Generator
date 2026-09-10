@@ -164,6 +164,19 @@ public:
 	                                            const FString& Slot);
 
 	/**
+	 * The combo entry that MEANS inherit: "(inherit - Wall_01_E_straight_large)", or
+	 * "(inherit - none)" where the kit leaves the slot empty.
+	 *
+	 * Built here rather than concatenated in the widget graph so the one property it must have
+	 * can be tested: PathForDisplayName does not recognise it, so selecting it reads back as
+	 * the empty path that means inherit. A label that collided with a real display name would
+	 * write that piece as an override the moment the panel pushed the chamber back -- the exact
+	 * freeze the entry exists to prevent.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Room Authoring|Pieces")
+	static FString GetInheritedPieceLabel(const URoomRecipeAsset* Recipe, const FString& Slot);
+
+	/**
 	 * Point the room at a kit set, or at nothing.
 	 *
 	 * URoomRecipeAsset::KitSet is BlueprintReadOnly, so this is the only door a widget has --

@@ -470,6 +470,20 @@ FString URoomAuthorTools::GetInheritedPieceDisplayName(const URoomRecipeAsset* R
 	return FString();
 }
 
+FString URoomAuthorTools::GetInheritedPieceLabel(const URoomRecipeAsset* Recipe,
+                                                const FString& Slot)
+{
+	const FString Inherited = GetInheritedPieceDisplayName(Recipe, Slot);
+
+	// Bracketed on purpose. A display name is an asset name with its decoration stripped, and
+	// an asset name cannot contain a bracket -- so this cannot collide with a real piece, and
+	// PathForDisplayName is guaranteed not to recognise it. That guarantee is what makes
+	// selecting this entry CLEAR the override rather than set a bogus one.
+	return Inherited.IsEmpty()
+		? FString(TEXT("(inherit - none)"))
+		: FString::Printf(TEXT("(inherit - %s)"), *Inherited);
+}
+
 void URoomAuthorTools::SetRoomKitSet(URoomRecipeAsset* Recipe, UDungeonKitSet* KitSet)
 {
 	if (Recipe == nullptr) { return; }
