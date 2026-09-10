@@ -8,19 +8,21 @@
 
 ## Where things stand
 
-Branch `port/room-authoring`, 22 commits. **Steps 1–6 done. Step 7 is most of the way
-done** — see **Step 7** below for what is left, which is the kit-set picker and nothing else.
+Branch `port/room-authoring`, 26 commits. **Steps 1–7 done.** The port is complete; what
+remains is content and one visual pass, both listed under **Step 7**.
 
 An authored room now bakes straight into v1's `Master_Room` contract and the pieces drop into
 the existing Blueprint generator with no converter. That was the point of the whole port, and
-it is done: a real bake ran from the widget on 2026-09-08 and produced four correct pieces.
+it is done: a real bake ran on 2026-09-08 and produced four correct pieces. (That bake was
+almost certainly driven by the console command rather than the widget button -- see
+correction 12.)
 
-**67 automation tests, 67 passing, 0 failing** — verified headlessly against a real build,
+**69 automation tests, 69 passing, 0 failing** — verified headlessly against a real build,
 not a Live Coding patch.
 
 | Group | n | What it covers |
 |---|---|---|
-| `Tools` | 18 | display names, the interior arch, chamber edit/attach, save/load, kit-set override panel, the inherit vocabulary |
+| `Tools` | 20 | display names, the interior arch, chamber edit/attach, save/load, kit-set override panel, the inherit vocabulary, the kit picker |
 | `Openings` | 7 | corner rules, one-opening-per-side, Open/Merged spans |
 | `KitSet` | 6 | census defaults, inherit, override, ceiling-empty, the null-kit fallback |
 | `Attachment` | 5 | centring, normalisation, ascending parents, back sides |
@@ -188,6 +190,21 @@ Each of these was verified against the assets or the code, and each cost time to
     `compile_blueprint`. The old external bridge's tool names survive here because they were
     always Epic's; the previous brief's guess that they were the bridge's own was wrong.
 
+12. **`PushUI` was pushing a 1x1 bounding rect, and that is why the Bake button never worked.**
+    Its `SetRoomFields` node had `BoundingWidth` and `BoundingLength` unconnected at literal
+    `0`, while every other data pin was wired; `SetRoomFields` clamps with `Max(1, ...)`. The
+    widget never calls `FitBoundsToChambers`, so nothing put the bounds back. A 7x7 chamber in
+    a 1x1 rect fails validation, so `DoBake` -- which calls `PushUI` first -- would have
+    refused.
+
+    This contradicts the previous brief's "a real bake ran from the widget". What can be said
+    for certain is only that the pins were disconnected on 2026-09-09 and that a widget bake
+    cannot succeed in that state; whether they were disconnected on the 8th was not
+    determined. The console path (`ProceduralDungeon.Author.Bake`) never touches `PushUI`,
+    which fits the evidence and fits why those commands were written at all.
+
+    Fixed by connecting both pins to the spin boxes `PullUI` already fills.
+
 ## Facts measured this session
 
 **`Master_Room`'s structure**, loaded from the asset:
@@ -239,60 +256,73 @@ room — but **authored rooms will not look like the existing ones.** Unresolved
 
 ---
 
-## Step 7 — what is left
+## Step 7 — done
 
-`EUW_RoomAuthor` is migrated to `/Game/RectDungeon/Authoring/EUW_RoomAuthor`, it runs, and the
-piece panel now speaks about inheritance correctly. **Only the kit-set picker remains.**
+`EUW_RoomAuthor` is migrated, rewired and compiling clean with warnings as errors. The piece
+panel speaks about inheritance correctly, the room panel has a kit-set picker, and a bug that
+made the Bake button unusable is fixed.
 
-### Done on 2026-09-09
+**Not verified by clicking.** Every graph was read back after writing, the widget compiles, and
+every C++ link is tested — but nobody has opened the tool and looked at it since. That is the
+one thing worth doing before building further.
 
-**The panel was freezing every inherited slot into an override, on every repaint.** This was
-worse than the previous brief's "the piece panel cannot express inherit", and it was live:
+### What was wrong, and what it turned out to be
 
-```
-RepaintPanel   ends with PushChamber
-RefreshCombos  filled each piece combo and selected index 0 -- a real piece
-PullChamber    called SelectOption(combo, "") for an inherited slot
-SelectOption   could not find "", did NOTHING, left index 0 selected
-PushChamber    wrote that index-0 piece back as an explicit override
-```
+| Believed | Actually |
+|---|---|
+| The Bake button's saved-path pin is stale | Void. The node had already reconstructed against the current signature; `OutStatus` was wired and the status string already names the folder and count |
+| The piece panel cannot express "inherit" | Understated. It was *destroying* inheritance on every repaint — see below |
+| — | `PushUI` passed literal `0` for both bounding dimensions, collapsing every room to 1×1 on every push. This is why the Bake button never worked and the console commands exist |
 
-So opening the tool or loading a room stopped that room following its kit. Fixed in `26cc193`
-by making index 0 not a real piece: `FillCombo` seeds each combo with
-`GetInheritedPieceLabel` and takes a `Slot` argument, and `SelectOption` treats an empty
-option as "select index 0" instead of as nothing to do. `PathForDisplayName` does not
-recognise the bracketed label, so pushing it back returns the empty path that means inherit --
-which is asserted by `Tools.TheInheritEntryReadsBackAsInherit`, not assumed.
+**The freeze.** `RepaintPanel` ends with `PushChamber`, and `PullChamber` called
+`SelectOption(combo, "")` for an inherited slot. `SelectOption` could not find `""`, did
+nothing, and left index 0 — a real piece — selected, which `PushChamber` then wrote back as an
+explicit override. Opening the tool or loading a room converted all seven inherited slots into
+hard overrides.
 
-Three C++ entry points were added for this (`6d6c467`, `91809ff`):
+Fixed by making index 0 not a real piece: `FillCombo` seeds each combo with
+`GetInheritedPieceLabel` and takes a `Slot` argument, and `SelectOption` treats an empty option
+as "select index 0". `PathForDisplayName` does not recognise the bracketed label, so pushing it
+back yields the empty path that means inherit.
+
+### The C++ this rests on
 
 | Function | What it is for |
 |---|---|
 | `GetInheritedPieceDisplayName(Recipe, Slot)` | what a slot WOULD resolve to. Reads the kit only — never a chamber, so it cannot hand the panel a value to freeze |
-| `GetInheritedPieceLabel(Recipe, Slot)` | the combo entry that means inherit: `(inherit - Wall_01_E_straight_large)` or `(inherit - none)` |
-| `SetRoomKitSet(Recipe, KitSet)` | the only door onto `URoomRecipeAsset::KitSet`, which is `BlueprintReadOnly`. Null is legal — it returns the room to the built-in census |
+| `GetInheritedPieceLabel(Recipe, Slot)` | the combo entry meaning inherit: `(inherit - Wall_01_E_straight_large)` or `(inherit - none)` |
+| `SetRoomKitSet(Recipe, KitSet)` | the only door onto `KitSet`, which is `BlueprintReadOnly`. Null is legal |
+| `GetKitSetLabels()` | every kit set in `/Game`, built-in census first |
+| `KitSetForLabel(Label)` | label → asset; null for the built-in entry and for unknown labels |
+| `LabelForRoomKitSet(Recipe)` | asset → label, DERIVED through the same rule the scan uses |
 
 Slot names mirror `GetChamberPieces`' outputs: `Wall`, `CornerNW`, `CornerNE`, `CornerSE`,
 `CornerSW`, `Floor`, `CeilingMesh`. All four corners answer with the kit's single `Corner`.
 
-**Not verified by clicking.** The graphs were read back and the widget compiles clean with
-warnings as errors, and every C++ link in the chain is tested — but nobody has opened the tool
-and looked at the combos since the change. Worth one pass before building on it.
+Two bracketed labels — `(inherit - ...)` and `(built-in census)` — carry a load-bearing
+guarantee: an asset name cannot contain a bracket, so neither can ever collide with a real
+piece or kit however the libraries grow.
 
-### Remaining: the kit-set picker
+### How the panel applies a kit
 
-The room panel still has no `KitSet` field, so `SetRoomKitSet` has no caller. The panel rows
-are named `Row<Thing>` with `Lbl_<Thing>` + `<Thing>Combo` inside; add `RowKitSet` beside
-`RowType` and follow `RefreshLoadCombo`'s shape — one scan producing labels, a second call
-resolving a label back to the asset, in the same order.
+**On Refresh, not on selection.** `RefreshCombos` fills and selects the picker; `PushUI` reads
+it back. That matches the rest of the panel — the piece combos have no change handlers either.
+`DoRefresh` now calls `RefreshCombos` so the `(inherit - ...)` labels, which are baked in at
+fill time, follow a kit change.
 
-That needs two more C++ functions, mirroring `GetLibraryRecipeLabels` / `LoadRecipeFromLibrary`:
-a label scan over `UDungeonKitSet` assets and a lookup from label to asset. The list must carry
-an entry for "no kit set" — that is a real, reachable state, not an empty selection.
+Immediate-apply was attempted and abandoned. UMG widget delegates are not `ActorComponent`
+events, so `add_component_bound_event` refuses them, and every alternative means rewriting the
+`EventGraph` — which carries designer-bound button events (`OnClicked(SaveButton)` and friends)
+that the DSL writer cannot reproduce. **Do not rewrite the EventGraph with `write_graph_dsl`.**
 
-**It must call `RepaintPanel` when the kit changes.** The inherit labels are baked into the
-combos at `RefreshCombos` time, so changing the kit without a repaint leaves every
-`(inherit - ...)` label naming the old kit's pieces.
+### Left over
+
+- **No `DA_KitSet_*` asset exists yet**, so the picker offers exactly one entry. Authoring the
+  first one is a content task, and it is what would make
+  `Tools.EveryListedKitSetResolvesAndRoundTrips` do real work — its loop is vacuous today and
+  logs that it checked nothing.
+- The bake's per-piece paths still are not shown in the widget; `OutSavedPaths` is wired to
+  nothing. The status line names the folder and the count, so this is cosmetic.
 
 ---
 
@@ -349,12 +379,22 @@ combos at `RefreshCombos` time, so changing the kit without a repaint leaves eve
     `SwitchActor|SelectOption`, which is an unrelated ENGINE function on `ASwitchActor` with
     completely different pins. Writing what you read would have silently built the wrong node.
     `find_node_types` returned both; `CallFunction|SelectOption` is the widget's.
+    The same trap bit again on `Behavior|GetValue`, which has FIVE overloads and resolves to
+    **Radial Slider**, not Spin Box — `Class|SpinBox|GetValue` is the one meant. Assume any
+    unqualified id is ambiguous and check it; the `Class|<Type>|<Fn>` form is unambiguous.
   - `(== a b)` picks an overload by guess and fails on strings. Use the explicit node —
     `Utilities|String|IsEmpty`, `Utilities|String|EqualExactly(String)`.
 
   **So: read, then verify every node type with `find_node_types` and `get_node_type_pins`
   before writing, and read back afterwards.** A failed `write_graph_dsl` leaves the graph
   untouched, which is the one merciful part — both failures this session were recoverable.
+
+- **Do NOT rewrite the EventGraph with `write_graph_dsl`.** It carries designer-bound widget
+  events -- `(event OnClicked(SaveButton) ...)`, `(event OnSelectionChanged(AttachCombo) ...)` --
+  and the writer cannot reproduce that binding. Rewriting it would silently unbind Save, Load
+  and Bake. Related: UMG widgets are not `ActorComponent`s, so `add_component_bound_event`
+  refuses them; there is no safe MCP route to a new designer-bound widget event, which is why
+  the kit picker applies on Refresh rather than on selection.
 
 - **Changing a Blueprint function's signature breaks its call sites until they are rewritten.**
   `add_function_param` on `FillCombo` made the body writable but left seven stale call nodes in
