@@ -1,10 +1,32 @@
-# Next session brief — the room authoring tool is ported and working
+# Next session brief — the room authoring tool is ported, wired and working
 
-> Written 2026-09-08, end of the session that executed steps 1–6 of the previous brief.
+> Written 2026-09-08 at the end of steps 1–6; **revised 2026-09-09 at the end of step 7**,
+> which finished the port.
+>
 > Everything below was **verified in this project**, not carried over from Level_Creator_1.
-> Where something is unverified, it says so. The brief this replaces is in git history at
-> `9317863`; several of its claims turned out to be wrong and are corrected under
-> **Corrections** below.
+> Where something is unverified, it says so — and the largest unverified thing is named at
+> the top of **Start here**, because it is the one gap worth closing first.
+>
+> This brief has now corrected its own predecessor twice. The brief it replaced is at
+> `9317863`; corrections 1–8 are against that one, and **corrections 9–12 are against the
+> 2026-09-08 revision of this file** — several of its confident claims about the widget
+> turned out to be wrong, including one that had the Bake button working when it could not
+> have been. Treat the Corrections section as the most load-bearing part of the document.
+
+## Start here
+
+1. **Open the tool and look at it.** Nothing in step 7 was verified by clicking — every
+   graph was read back and the widget compiles clean with warnings as errors, but no human
+   has seen the panel since it changed. Specifically worth checking: the piece combos read
+   `(inherit - <piece>)` on an un-overridden chamber, the new KitSet row appears under
+   RoomType, and the bounding spins survive a Refresh instead of collapsing to 1.
+2. **Run a bake from the Bake button**, not the console. It should work now for the first
+   time — see correction 12 — and `Contract.BakedRoomsSatisfyTheMasterRoomContract` checks
+   whatever the library holds, so run it afterwards.
+3. **Author a `DA_KitSet_*` asset** if you want the kit picker to do anything. It offers
+   exactly one entry today, correctly, because the project has no kit set assets.
+
+Everything else is in **Backlog**, and none of it blocks.
 
 ## Where things stand
 
@@ -328,6 +350,20 @@ that the DSL writer cannot reproduce. **Do not rewrite the EventGraph with `writ
 
 ## Backlog, roughly prioritised
 
+- **A GitHub personal access token is embedded in the `origin` remote URL**, in plaintext in
+  `.git/config`. `git remote -v` prints it, so it leaks into any pasted output, screen share or
+  agent transcript — it was printed into one on 2026-09-09, which is how it was noticed.
+  **Rotate that token**, then set the remote to a bare `https://github.com/...` URL and let a
+  credential helper hold the secret. It is not committed — `.git/config` is not tracked — so
+  this is a local-exposure problem, not a repository-history one.
+- **Two throwaway recipes are untracked on disk**: `DA_RoomRecipe_Room_New` and
+  `DA_RoomRecipe_Room_New2` under `Rooms/Generic/`. Their baked `BP_Room_*` pieces are ignored
+  by the rule below; the recipes themselves are trackable and simply have not been added.
+  Delete them or commit them deliberately — leaving them is how one gets committed by accident.
+- **`Content/RectDungeon/Authoring/L_RoomAuthoring.umap` has been modified since before
+  2026-09-08** and is still uncommitted. Nothing in the last two sessions authored that change,
+  so it was left alone rather than committed blind. Work out what it is and either commit or
+  revert it.
 - **Geometry volume.** 966 SCS nodes and 1.1 MB *per baked piece*, ×4 pieces for a four-exit
   room. Blueprints get slow to open and compile around ~1000 SCS nodes, and this is per room in
   the library. If it bites, the fix is instanced static meshes rather than one component per

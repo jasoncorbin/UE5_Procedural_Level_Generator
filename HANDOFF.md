@@ -8,6 +8,24 @@
 
 ---
 
+> ## STATUS — 2026-09-09
+>
+> **This document is a historical SOURCE, written before the port. Parts of it are now out of
+> date, and it is kept as written rather than revised.** For the current state of the work,
+> read [NEXT-SESSION.md](NEXT-SESSION.md) — that is the live handoff.
+>
+> **§9.2's room-authoring tool is ported and working**, on branch `port/room-authoring`.
+> An authored room bakes straight into v1's `Master_Room` contract and the pieces drop into
+> the existing Blueprint generator with no converter. 69 automation tests cover it.
+>
+> So wherever this document says the Unreal project has **"no equivalent"** of a
+> room-authoring tool — §0, §6 and §9 all say it — read that as describing 2026-08-10, not
+> today. The rest of §9's Unity comparison still stands: §9.1's generator work
+> (`FPlacementFrame`, `FRoomExit`, the hall connector pool, the generation manifest) has
+> **not** been ported, and Appendix A's "no equivalent" rows are still accurate for those.
+
+---
+
 ## 0. How to use this document
 
 Sections 1–3 describe **what exists and why**, so nothing gets lost in the port. Sections 4–6 are the **v2 design** — what to build differently and why. Section 7 answers open questions the tutorial left dangling. **Section 9 is the most actionable part of this document**: your Unity project already built and shipped working solutions to four of the problems listed in §3, plus a room-authoring tool the Unreal project has no equivalent of. Read §9 before writing any v2 code.
