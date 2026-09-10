@@ -372,9 +372,17 @@ that the DSL writer cannot reproduce. **Do not rewrite the EventGraph with `writ
   original brief said *interior* tiles. A point therefore sits against each wall. One-line fix to
   inset by a tile if wanted.
 - `Config/DefaultGame.ini` still says `ProjectName=Third Person BP Game Template`.
-- **The 5.7→5.8 content resave** is still outstanding and now *partial* — `1_Hall1` and two
-  ThirdPersonMap actors were resaved incidentally (`03a7a0d`). Doing the rest deliberately, in
-  its own commit, is still the right shape.
+- **The 5.7→5.8 content resave** is still outstanding and still *partial*. `1_Hall1` and two
+  ThirdPersonMap actors were resaved incidentally and committed in `03a7a0d`. Doing the rest
+  deliberately, in its own commit, is still the right shape.
+
+  **Five more are sitting resaved and UNCOMMITTED in the working tree** as of 2026-09-09:
+  `1_Hall2.uasset` and four `__ExternalActors__/ThirdPerson/Maps/ThirdPersonMap/` actors.
+  Merely opening the editor produces them — it upgrades 5.7 packages on load — so they will
+  reappear after any revert. They were deliberately left uncommitted rather than swept into a
+  documentation commit, which is how the two accidental content commits on this branch
+  happened. Either do the resave properly as its own pass, or revert them and accept they will
+  come back.
 - **The `.uproject` is LFS-tracked** (`*.uproject filter=lfs` in `.gitattributes`). A clone
   without LFS installed gets a pointer file and cannot open the project.
 - ~~Decide whether baked rooms belong in git.~~ **Decided 2026-09-09: ignored.** The rule
