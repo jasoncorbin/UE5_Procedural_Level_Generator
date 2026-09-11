@@ -1,0 +1,10 @@
+[
+	{
+		"file": "E:\\UE5 Projects\\UE5_Procedural_Level_Generator\\Source\\ProceduralDungeon\\ProceduralDungeon.cpp",
+		"arguments": [
+			"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\14.51.36231\\bin\\Hostx64\\x64\\cl.exe",
+			"@E:\\UE5 Projects\\UE5_Procedural_Level_Generator\\.vscode\\compileCommands_Default\\ProceduralDungeon.0.rsp"
+		],
+		"directory": "E:\\UE4 Projects\\_UE4\\UE_5.8\\Engine\\Source"
+	}
+]
