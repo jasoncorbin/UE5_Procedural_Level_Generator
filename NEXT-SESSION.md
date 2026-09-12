@@ -1,7 +1,8 @@
 # Next session brief — the room authoring tool is ported, wired and working
 
 > Written 2026-09-08 at the end of steps 1–6; **revised 2026-09-09 at the end of step 7**,
-> which finished the port.
+> which finished the port; **revised again 2026-09-12**, when the branch was pushed to
+> `origin` and four backlog items closed.
 >
 > Everything below was **verified in this project**, not carried over from Level_Creator_1.
 > Where something is unverified, it says so — and the largest unverified thing is named at
@@ -30,8 +31,9 @@ Everything else is in **Backlog**, and none of it blocks.
 
 ## Where things stand
 
-Branch `port/room-authoring`, 26 commits. **Steps 1–7 done.** The port is complete; what
-remains is content and one visual pass, both listed under **Step 7**.
+Branch `port/room-authoring`, 32 commits, **pushed to `origin` 2026-09-12**. **Steps 1–7
+done.** The port is complete; what remains is content and one visual pass, both listed under
+**Step 7**.
 
 An authored room now bakes straight into v1's `Master_Room` contract and the pieces drop into
 the existing Blueprint generator with no converter. That was the point of the whole port, and
@@ -350,20 +352,30 @@ that the DSL writer cannot reproduce. **Do not rewrite the EventGraph with `writ
 
 ## Backlog, roughly prioritised
 
-- **A GitHub personal access token is embedded in the `origin` remote URL**, in plaintext in
-  `.git/config`. `git remote -v` prints it, so it leaks into any pasted output, screen share or
-  agent transcript — it was printed into one on 2026-09-09, which is how it was noticed.
-  **Rotate that token**, then set the remote to a bare `https://github.com/...` URL and let a
-  credential helper hold the secret. It is not committed — `.git/config` is not tracked — so
-  this is a local-exposure problem, not a repository-history one.
-- **Two throwaway recipes are untracked on disk**: `DA_RoomRecipe_Room_New` and
-  `DA_RoomRecipe_Room_New2` under `Rooms/Generic/`. Their baked `BP_Room_*` pieces are ignored
-  by the rule below; the recipes themselves are trackable and simply have not been added.
-  Delete them or commit them deliberately — leaving them is how one gets committed by accident.
-- **`Content/RectDungeon/Authoring/L_RoomAuthoring.umap` has been modified since before
-  2026-09-08** and is still uncommitted. Nothing in the last two sessions authored that change,
-  so it was left alone rather than committed blind. Work out what it is and either commit or
-  revert it.
+- **Two branches, two `.gitignore` files — keep them in step.** Every ignore rule this port
+  added lived only on `port/room-authoring`, so `master` never had them. On 2026-09-12 a commit
+  on `master` picked up the 8 baked `BP_Room_*` pieces and the per-machine
+  `.vscode/compileCommands_*` and pushed them — the **third** accidental commit of derived bake
+  output, and each one landed on whichever branch the guard did not reach. `d939a8a` copies the
+  block onto `master` verbatim, so the two agree today. **They will drift again the moment a
+  rule is added to one branch only.** `transcript.txt` is deliberately left tracked on `master`:
+  the rule matches it, but it is authored content, not derived output.
+
+- ~~A GitHub personal access token is embedded in the `origin` remote URL.~~ **Resolved
+  2026-09-12.** The remote is now a bare `https://github.com/...` URL with no credentials in
+  it, and Git Credential Manager holds the secret. The exposed token is dead — GitHub rejected it
+  with *Invalid username or token* — so there is nothing left to rotate.
+
+  Worth knowing for next time: GCM stores the github.com credential under username `jlcorbin`,
+  not `jasoncorbin`. When it goes stale every push fails *without prompting*, which reads like
+  a network or permission fault and is neither. To see what is stored, feed `protocol=https`
+  and `host=github.com` on stdin to `git credential-manager get`.
+- ~~Two throwaway recipes are untracked on disk.~~ **Committed 2026-09-12** in `00daced`.
+  They are now tracked room source. If they were genuinely throwaway, delete them in their own
+  commit rather than leaving them to be mistaken for a library.
+- ~~`L_RoomAuthoring.umap` has been modified since before 2026-09-08 and is uncommitted.~~
+  **Committed 2026-09-12** in `00daced`, along with everything else that was sitting in the
+  tree. Nobody established what the change was, so it is now committed rather than understood.
 - **Geometry volume.** 966 SCS nodes and 1.1 MB *per baked piece*, ×4 pieces for a four-exit
   room. Blueprints get slow to open and compile around ~1000 SCS nodes, and this is per room in
   the library. If it bites, the fix is instanced static meshes rather than one component per
@@ -376,13 +388,11 @@ that the DSL writer cannot reproduce. **Do not rewrite the EventGraph with `writ
   ThirdPersonMap actors were resaved incidentally and committed in `03a7a0d`. Doing the rest
   deliberately, in its own commit, is still the right shape.
 
-  **Five more are sitting resaved and UNCOMMITTED in the working tree** as of 2026-09-09:
-  `1_Hall2.uasset` and four `__ExternalActors__/ThirdPerson/Maps/ThirdPersonMap/` actors.
-  Merely opening the editor produces them — it upgrades 5.7 packages on load — so they will
-  reappear after any revert. They were deliberately left uncommitted rather than swept into a
-  documentation commit, which is how the two accidental content commits on this branch
-  happened. Either do the resave properly as its own pass, or revert them and accept they will
-  come back.
+  The five that were sitting uncommitted on 2026-09-09 — `1_Hall2.uasset` and four
+  `__ExternalActors__/ThirdPerson/Maps/ThirdPersonMap/` actors — **were committed 2026-09-12**
+  in `00daced`. That does not finish the resave, it just moves the boundary: opening the editor
+  still upgrades whatever 5.7 packages it touches, so more will appear. The deliberate pass is
+  still owed.
 - **The `.uproject` is LFS-tracked** (`*.uproject filter=lfs` in `.gitattributes`). A clone
   without LFS installed gets a pointer file and cannot open the project.
 - ~~Decide whether baked rooms belong in git.~~ **Decided 2026-09-09: ignored.** The rule
@@ -396,6 +406,22 @@ that the DSL writer cannot reproduce. **Do not rewrite the EventGraph with `writ
 ---
 
 ## Traps
+
+**The work is on `port/room-authoring`, and `master` does not have any of it.** Checking out
+`master` makes the project look like the port never happened: no `Source/ProceduralDungeon`,
+a 53-byte `.uproject` with no modules, none of the authoring content. 106 files differ. This
+happened on 2026-09-12 and read convincingly as the project having reverted. It had not.
+`git reflog` settles it in one line, and `git switch port/room-authoring` undoes it.
+
+**Close the editor before switching branches.** The switch rewrites `Procedural_Dongeon.uproject`
+itself — that is the file declaring the `ProceduralDungeon` module — and adds 61 content assets
+while deleting 33. Doing that under a live editor is how a session gets corrupted.
+
+Switching away from `master` also *deletes* 20 files that `master` tracks and the port branch
+does not, under `Saved/` and `Intermediate/` — including `Saved/Config/WindowsEditor/`, which
+holds editor layout and preferences. They regenerate, but back them up if you care about the
+layout. Git refuses the switch outright if any of them are locally modified; stash rather than
+discard, because `git checkout -- .` throws away the only copy.
 
 - **THE MYSTERY CONTENT COMMITS ARE EXPLAINED.** An MCP call that touches an asset marks it
   dirty, and the editor writes it out on close or autosave — so a `.uasset` appears modified in
