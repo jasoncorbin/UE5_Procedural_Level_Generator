@@ -87,3 +87,19 @@ DerivedDataCache/
 # Never ignore git files
 !.gitignore
 !.gitattributes
+# Session transcripts
+transcript.txt
+
+# Generated per-machine by UnrealBuildTool project generation
+.vscode/compileCommands_*
+
+# The room library holds BOTH derived data and authored source, in the same folder by design.
+#
+# DERIVED -- ignored. The bake regenerates BP_Room_* and DA_Room_* wholesale, one piece per
+# exit, at ~1.1 MB of LFS each. Two 4.5 MB commits landed by accident before this rule covered
+# every room type rather than just Generic/.
+#
+# SOURCE -- tracked. DA_RoomRecipe_* is what the author saves and re-opens; it is the room.
+# Do NOT widen this to the whole folder, which is the obvious-looking change that loses it.
+Content/RectDungeon/Rooms/**/BP_Room_*
+Content/RectDungeon/Rooms/**/DA_Room_*
