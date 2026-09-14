@@ -6,7 +6,10 @@ Nobody is doing any of this. None of it blocks. Roughly prioritised.
 
 - **Open the authoring tool and look at it.** Nothing was verified by clicking. Every graph was
   read back and the widget compiles clean with warnings as errors, but no human has seen the
-  panel since it changed.
+  panel since it changed. Check three things: the piece combos read `(inherit - <piece>)` on an
+  un-overridden chamber, the KitSet row appears under RoomType, and the bounding spins survive a
+  Refresh instead of collapsing to 1. If any of those is wrong it is a bug, not a completed
+  item — it becomes the next entry here rather than being struck off.
 
 - **Run a bake from the Bake button**, not the console. It should work for the first time now
   that `PushUI` pushes real bounds. Run

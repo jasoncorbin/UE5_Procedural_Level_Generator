@@ -21,7 +21,10 @@ Symptoms and alternatives for each: `failures.md`.
 
 - Working: the room-authoring tool is ported and wired. 69/69 automation tests pass. An authored room bakes into `Master_Room` with no converter. One branch, `master`, since PR #1 merged.
 - In progress: nothing. The port is complete.
-- Next: open the tool and click through it. Nothing was verified visually — check that piece combos read `(inherit - <piece>)` on an un-overridden chamber, the KitSet row appears under RoomType, and the bounding spins survive a Refresh instead of collapsing to 1.
+- Next: open the authoring tool and click through it. What to check is in `backlog.md`.
+
+When the Next item is finished, delete it from `backlog.md` and promote the following item to
+this line. In a normal session that is the only edit this file needs.
 
 ## Files
 
