@@ -8,21 +8,18 @@
 
 ---
 
-> ## STATUS — 2026-09-09
+> ## ARCHIVED — not in the read path
 >
-> **This document is a historical SOURCE, written before the port. Parts of it are now out of
-> date, and it is kept as written rather than revised.** For the current state of the work,
-> read [NEXT-SESSION.md](NEXT-SESSION.md) — that is the live handoff.
+> **Historical source, written 2026-08-10 before the port. Kept as written rather than
+> revised, so assume any claim here is stale until checked.** Start at `CLAUDE.md`.
 >
-> **§9.2's room-authoring tool is ported and working**, on branch `port/room-authoring`.
-> An authored room bakes straight into v1's `Master_Room` contract and the pieces drop into
-> the existing Blueprint generator with no converter. 69 automation tests cover it.
+> Known stale: §0, §6 and §9 say the Unreal project has **"no equivalent"** of a
+> room-authoring tool. §9.2's tool is ported, wired and covered by 69 tests. §5's checklist
+> shows 35 unchecked boxes, several of which are done. §3.11's hygiene items are three-quarters
+> resolved. §10's CCGS intake brief was never acted on — CCGS is not deployed in this project.
 >
-> So wherever this document says the Unreal project has **"no equivalent"** of a
-> room-authoring tool — §0, §6 and §9 all say it — read that as describing 2026-08-10, not
-> today. The rest of §9's Unity comparison still stands: §9.1's generator work
-> (`FPlacementFrame`, `FRoomExit`, the hall connector pool, the generation manifest) has
-> **not** been ported, and Appendix A's "no equivalent" rows are still accurate for those.
+> Still live, and moved to `generator-port.md`: §3's ranked design problems and §9.1's Unity
+> generator port. Appendix A's "no equivalent" rows are accurate for those.
 
 ---
 
